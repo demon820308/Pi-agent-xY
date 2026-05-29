@@ -1,0 +1,69 @@
+name: Build Desktop Application
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      # Solve symbolic link cache resolution on Windows runner automatically
+      - name: Extract winCodeSign without Symlinks (Windows only)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          # Trigger winCodeSign download by starting electron-builder momentarily or fetch it
+          npm run build
+          # We execute electron-builder in a try-catch to let it download, then surgically extract it
+          try {
+            npx electron-builder --win --dir
+          } catch {
+            # Catch expected symlink error
+          }
+          $cacheDir = "$env:LOCALAPPDATA\electron-builder\Cache\winCodeSign"
+          if (Test-Path $cacheDir) {
+            $zipFile = Get-ChildItem -Path $cacheDir -Filter "*.7z" | Select-Object -First 1
+            if ($zipFile) {
+              Write-Host "Found winCodeSign archive: $($zipFile.FullName)"
+              $targetDir = Join-Path $cacheDir "winCodeSign-2.6.0"
+              # Extract without darwin symlinks
+              & "node_modules/7zip-bin/win/x64/7za.exe" x -snld -bd $zipFile.FullName "-o$targetDir" "-x!darwin"
+              Write-Host "Successfully extracted winCodeSign to cache!"
+            }
+          }
+
+      - name: Build Next.js & Package App
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run electron:build
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-agent-xy-${{ matrix.os }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/*.blockmap
