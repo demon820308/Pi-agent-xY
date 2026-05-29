@@ -12,7 +12,8 @@ export async function POST(req: Request) {
     if (!pkg?.trim()) return NextResponse.json({ error: "package required" }, { status: 400 });
 
     const isGlobal = scope !== "project";
-    const args = ["skills", "add", pkg.trim(), "-y", "--agent", "pi"];
+    const installTarget = pkg.includes("@") ? pkg.split("@")[0] : pkg;
+    const args = ["skills", "add", installTarget.trim(), "-y", "--agent", "pi"];
     if (isGlobal) args.push("-g");
 
     console.log(`[skills/install] running: npx ${args.join(" ")}`);
