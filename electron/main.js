@@ -1,11 +1,42 @@
 const { app, BrowserWindow } = require("electron");
 const path = require("path");
-const { spawn } = require("child_process");
 const http = require("http");
 
 let mainWindow;
-let nextProcess;
+let nextServer;
 const PORT = 3030;
+
+function startNextServer() {
+  if (app.isPackaged) {
+    try {
+      // Run Next.js programmatically in production inside the main process.
+      // This completely avoids child_process.spawn issues and the need for a separate Node binary.
+      const next = require("next");
+      const nextApp = next({
+        dev: false,
+        dir: path.join(__dirname, "..")
+      });
+      const handle = nextApp.getRequestHandler();
+
+      nextApp.prepare().then(() => {
+        nextServer = http.createServer((req, res) => {
+          handle(req, res);
+        });
+        nextServer.listen(PORT, (err) => {
+          if (err) {
+            console.error("[Next.js Server Error]:", err);
+            return;
+          }
+          console.log(`[Next.js Server] listening on http://localhost:${PORT}`);
+        });
+      }).catch((err) => {
+        console.error("[Next.js Prepare Error]:", err);
+      });
+    } catch (e) {
+      console.error("[Next.js Module Load Error]:", e);
+    }
+  }
+}
 
 function checkServerReady(callback) {
   const req = http.get(`http://localhost:${PORT}/api/models`, (res) => {
@@ -18,38 +49,6 @@ function checkServerReady(callback) {
   req.on("error", () => {
     setTimeout(() => checkServerReady(callback), 250);
   });
-}
-
-function startNextServer() {
-  if (app.isPackaged) {
-    // In production, we run the compiled Next.js service.
-    // Locate the Next.js CLI entry point dynamically for robust path resolving.
-    const pkgDir = path.join(__dirname, "..");
-    let nextBin;
-    try {
-      nextBin = require.resolve("next/dist/bin/next", { paths: [pkgDir] });
-    } catch {
-      try {
-        const nextPkg = require.resolve("next/package.json", { paths: [pkgDir] });
-        nextBin = path.join(path.dirname(nextPkg), "dist", "bin", "next");
-      } catch {
-        nextBin = path.join(pkgDir, "node_modules", "next", "dist", "bin", "next");
-      }
-    }
-
-    nextProcess = spawn(process.execPath, [
-      nextBin,
-      "start",
-      "-p",
-      String(PORT)
-    ], {
-      cwd: pkgDir,
-      env: { ...process.env, NODE_ENV: "production" }
-    });
-
-    nextProcess.stdout.on("data", (data) => console.log(`[Next.js]: ${data}`));
-    nextProcess.stderr.on("data", (data) => console.error(`[Next.js Err]: ${data}`));
-  }
 }
 
 function createWindow() {
@@ -95,9 +94,9 @@ app.on("window-all-closed", () => {
   }
 });
 
-// Clean up background Next.js process before quit to release port and resources
+// Clean up background Next.js server before quit
 app.on("will-quit", () => {
-  if (nextProcess) {
-    nextProcess.kill();
+  if (nextServer) {
+    nextServer.close();
   }
 });
