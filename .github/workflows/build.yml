@@ -10,6 +10,10 @@ on:
 jobs:
   release:
     runs-on: ${{ matrix.os }}
+    
+    # Grant contents:write permission to allow GITHUB_TOKEN to create and publish releases
+    permissions:
+      contents: write
 
     strategy:
       fail-fast: false # Ensures that if macOS fails, Windows build will still finish successfully
