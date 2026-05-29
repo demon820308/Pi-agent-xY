@@ -3,6 +3,10 @@
   "version": "0.6.24",
   "description": "Pi Agent xY - Web UI for the pi coding agent",
   "main": "electron/main.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/demon820308/Pi-agent-xY.git"
+  },
   "bin": {
     "pi-agent-xy": "bin/pi-web.js"
   },
