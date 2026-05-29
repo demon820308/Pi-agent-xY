@@ -28,34 +28,31 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      # Solve symbolic link cache resolution on Windows runner automatically
-      - name: Extract winCodeSign without Symlinks (Windows only)
+      # Solve symbolic link cache resolution on Windows runner automatically by downloading & prepopulating cache
+      - name: Manually Prepopulate winCodeSign Cache (Windows only)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          # Trigger winCodeSign download by starting electron-builder momentarily or fetch it
-          npm run build
-          # We execute electron-builder in a try-catch to let it download, then surgically extract it
-          try {
-            npx electron-builder --win --dir
-          } catch {
-            # Catch expected symlink error
-          }
           $cacheDir = "$env:LOCALAPPDATA\electron-builder\Cache\winCodeSign"
-          if (Test-Path $cacheDir) {
-            $zipFile = Get-ChildItem -Path $cacheDir -Filter "*.7z" | Select-Object -First 1
-            if ($zipFile) {
-              Write-Host "Found winCodeSign archive: $($zipFile.FullName)"
-              $targetDir = Join-Path $cacheDir "winCodeSign-2.6.0"
-              # Extract without darwin symlinks
-              & "node_modules/7zip-bin/win/x64/7za.exe" x -snld -bd $zipFile.FullName "-o$targetDir" "-x!darwin"
-              Write-Host "Successfully extracted winCodeSign to cache!"
-            }
-          }
+          Write-Host "Creating cache directory: $cacheDir"
+          New-Item -ItemType Directory -Force -Path $cacheDir
+          
+          $zipPath = Join-Path $cacheDir "winCodeSign-2.6.0.7z"
+          $downloadUrl = "https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z"
+          
+          Write-Host "Downloading winCodeSign from: $downloadUrl"
+          Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath
+          
+          Write-Host "Extracting winCodeSign without macOS symlinks..."
+          $targetDir = Join-Path $cacheDir "winCodeSign-2.6.0"
+          & "node_modules/7zip-bin/win/x64/7za.exe" x -snld -bd $zipPath "-o$targetDir" "-x!darwin"
+          
+          Write-Host "winCodeSign cache populated successfully!"
 
       - name: Build Next.js & Package App
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false # Disables keychain lookup on macOS to prevent signing failure on CI
         run: npm run electron:build
 
       - name: Upload Artifacts
