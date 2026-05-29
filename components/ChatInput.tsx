@@ -389,7 +389,11 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
 }
 
   const processImageFiles = useCallback(async (files: File[]) => {
-    const imageFiles = files.filter((f) => f.type.startsWith("image/"));
+    const imageFiles = files.filter((f) => {
+      if (f.type && f.type.startsWith("image/")) return true;
+      const ext = f.name.toLowerCase().split('.').pop();
+      return ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"].includes(ext || "");
+    });
     if (!imageFiles.length) return;
     try {
       const newImages = await Promise.all(
