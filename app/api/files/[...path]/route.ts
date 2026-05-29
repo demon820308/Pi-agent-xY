@@ -416,6 +416,14 @@ export async function POST(
       fs.mkdirSync(dir, { recursive: true });
     }
 
+    // Auto-create .gitignore inside the Temp folder if it's created or exists
+    if (path.basename(dir).toLowerCase() === "temp") {
+      const gitignorePath = path.join(dir, ".gitignore");
+      if (!fs.existsSync(gitignorePath)) {
+        fs.writeFileSync(gitignorePath, "*\n");
+      }
+    }
+
     fs.writeFileSync(filePath, Buffer.from(data));
 
     return NextResponse.json({ success: true, path: filePath });

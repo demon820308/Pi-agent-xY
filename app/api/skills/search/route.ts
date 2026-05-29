@@ -112,10 +112,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ results });
     }
   } catch (e: unknown) {
-    const err = e as { stdout?: string; stderr?: string; message?: string };
+    const err = e as { stdout?: string; stderr?: string; message?: string; code?: string };
     const raw = (err.stdout ?? "") + (err.stderr ?? "");
     const results = raw ? parseSearchOutput(raw) : [];
     if (results.length > 0) return NextResponse.json({ results });
+    
+    // Check if Node.js/npx is missing on the system (ENOENT)
+    const isEnoent = err.code === "ENOENT" || (err.message && err.message.includes("ENOENT"));
+    if (isEnoent) {
+      return NextResponse.json({
+        error: "系统未检测到 Node.js 环境。本地搜索技能需要 Node.js，请前往 https://nodejs.org 下载安装后重启应用。"
+      }, { status: 500 });
+    }
+    
     return NextResponse.json({ error: err.message ?? String(e) }, { status: 500 });
   }
 }

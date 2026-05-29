@@ -533,7 +533,7 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
       try {
         const uploaded = await Promise.all(
           attachedFiles.map(async (f) => {
-            const destPath = joinFilePath(cwd, f.name);
+            const destPath = joinFilePath(joinFilePath(cwd, "Temp"), f.name);
             const encoded = encodeFilePathForApi(destPath);
             const res = await fetch(`/api/files/${encoded}`, {
               method: "POST",
@@ -546,7 +546,7 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
             return f;
           })
         );
-        const uploadedNotes = "\n\n📄 [已上传文件到工作区]\n" + uploaded.map(f => `- ${f.name} (${formatBytes(f.size)})`).join("\n");
+        const uploadedNotes = "\n\n📄 [已上传文件到工作区]\n" + uploaded.map(f => `- Temp/${f.name} (${formatBytes(f.size)})`).join("\n");
         finalMsg = finalMsg ? `${finalMsg}${uploadedNotes}` : uploadedNotes.trim();
         setAttachedFiles([]);
       } catch (err: any) {
@@ -591,7 +591,7 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
       try {
         const uploaded = await Promise.all(
           attachedFiles.map(async (f) => {
-            const destPath = joinFilePath(cwd, f.name);
+            const destPath = joinFilePath(joinFilePath(cwd, "Temp"), f.name);
             const encoded = encodeFilePathForApi(destPath);
             const res = await fetch(`/api/files/${encoded}`, {
               method: "POST",
@@ -604,7 +604,7 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
             return f;
           })
         );
-        const uploadedNotes = "\n\n📄 [已上传文件到工作区]\n" + uploaded.map(f => `- ${f.name} (${formatBytes(f.size)})`).join("\n");
+        const uploadedNotes = "\n\n📄 [已上传文件到工作区]\n" + uploaded.map(f => `- Temp/${f.name} (${formatBytes(f.size)})`).join("\n");
         finalMsg = finalMsg ? `${finalMsg}${uploadedNotes}` : uploadedNotes.trim();
         setAttachedFiles([]);
       } catch (err: any) {
