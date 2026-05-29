@@ -77,7 +77,8 @@
         "dmg",
         "zip"
       ],
-      "icon": "public/icon.png"
+      "icon": "public/icon.png",
+      "identity": null
     },
     "dmg": {
       "iconSize": 100,
