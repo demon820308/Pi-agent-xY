@@ -29,8 +29,17 @@ export async function POST(req: Request) {
     }
     return NextResponse.json({ success: true, output });
   } catch (e: unknown) {
-    const err = e as { stdout?: string; stderr?: string; message?: string };
+    const err = e as { stdout?: string; stderr?: string; message?: string; code?: string };
     const output = ((err.stdout ?? "") + (err.stderr ?? "")).replace(ANSI_RE, "");
+    
+    // Check if Node.js/npx is missing on the system (ENOENT)
+    const isEnoent = err.code === "ENOENT" || (err.message && err.message.includes("ENOENT"));
+    if (isEnoent) {
+      return NextResponse.json({
+        error: "系统未检测到 Node.js 环境。安装技能需要 Node.js，请前往 https://nodejs.org 下载安装后重启应用。"
+      }, { status: 500 });
+    }
+    
     return NextResponse.json({ error: output || (err.message ?? String(e)) }, { status: 500 });
   }
 }
