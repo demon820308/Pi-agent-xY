@@ -64,6 +64,18 @@ function createWindow() {
     autoHideMenuBar: true, // Hide top menu bar for premium native feel
   });
 
+  // Register F12 / Ctrl+Shift+I to toggle DevTools, and F5 / Ctrl+R to reload
+  mainWindow.webContents.on("before-input-event", (event, input) => {
+    if (input.key === "F12" || (input.control && input.shift && input.key.toLowerCase() === "i")) {
+      mainWindow.webContents.toggleDevTools();
+      event.preventDefault();
+    }
+    if (input.key === "F5" || (input.control && input.key.toLowerCase() === "r")) {
+      mainWindow.webContents.reload();
+      event.preventDefault();
+    }
+  });
+
   const url = `http://localhost:${PORT}`;
   if (app.isPackaged) {
     checkServerReady(() => {
