@@ -20,10 +20,10 @@ jobs:
       - name: Check out Git repository
         uses: actions/checkout@v4
 
-      - name: Install Node.js
+      - name: Install Node.js (Upgraded to Node 22 to natively support markAsUncloneable)
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - name: Install dependencies
