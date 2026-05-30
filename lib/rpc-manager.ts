@@ -39,6 +39,27 @@ function injectSystemGuidelines(inner: any) {
   if (inner.agent?.state && typeof inner.agent.state.systemPrompt === "string") {
     inner.agent.state.systemPrompt = stripGuidelines(inner.agent.state.systemPrompt) + newPromptAdditions;
   }
+
+  // Intercept the resource loader dynamically to prevent the underlying library from overwriting our guidelines on new turns!
+  if (inner.resourceLoader && typeof inner.resourceLoader.getSystemPrompt === "function") {
+    const loader = inner.resourceLoader;
+    if (!loader.getSystemPrompt.__wrapped) {
+      const originalGet = loader.getSystemPrompt;
+      const wrappedFn = function (this: any, ...args: any[]) {
+        const originalPrompt = originalGet.apply(this, args);
+        const activeModel = inner.model;
+        const supportsVisionActive = activeModel ? isVisionModel(activeModel.provider, activeModel.id) : false;
+        let additions = tempGuideline;
+        if (supportsVisionActive) {
+          additions += visionGuideline;
+        }
+        return stripGuidelines(originalPrompt) + additions;
+      };
+      (wrappedFn as any).__wrapped = true;
+      (wrappedFn as any).originalGet = originalGet;
+      loader.getSystemPrompt = wrappedFn;
+    }
+  }
 }
 
 // ============================================================================
