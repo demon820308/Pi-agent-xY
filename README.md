@@ -30,6 +30,18 @@
 #### Windows 安装包下载
 直接前往 [GitHub Releases](https://github.com/demon820308/Pi-agent-xY/releases) 下载最新生成的 `Pi Agent xY Desktop Setup 0.6.24.exe` 一键安装。
 
+#### macOS 安装包下载与 Gatekeeper 签名警告解决 (重要)
+前往 [GitHub Releases](https://github.com/demon820308/Pi-agent-xY/releases) 下载 `.dmg` 安装包，将其拖拽至 `Applications` 目录中。
+
+> ⚠️ **macOS 提示“文件已损坏”或“身份不明的开发者”解决办法**
+> 由于 standalone 桌面客户端未在 Apple 开发者账号进行官方代码签名，macOS Gatekeeper 安全体系可能会在首次打开应用时拦截，并弹出“软件已损坏，无法打开”或“无法验证开发者”等警告。
+> **极速解锁与绕过指令**：
+> 请打开您的 Mac 终端（Terminal），直接复制并执行以下命令（以清除 macOS 的隔离 quarantine 标识属性）：
+> ```bash
+> xattr -cr /Applications/Pi\ Agent\ xY\ Desktop.app
+> ```
+> 运行后，即可直接在 Launchpad 或 Applications 中双击秒开，完美运行！
+
 #### 开发调试 (Dev Mode)
 ```bash
 # 并发启动 Next.js 本地微服务（3030 端口）并自动唤起 Electron 主窗口
