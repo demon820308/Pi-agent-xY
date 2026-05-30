@@ -4,36 +4,40 @@ import { cacheSessionPath } from "./session-reader";
 import type { AgentSessionLike, ToolInfo } from "./pi-types";
 import { isVisionModel } from "./vision";
 
-function injectVisionGuideline(inner: any) {
+function injectSystemGuidelines(inner: any) {
   const model = inner.model;
   if (!model) return;
 
   const supportsVision = isVisionModel(model.provider, model.id);
 
-  const guideline = `\n\n## Multimodal Vision Guidance
+  const visionGuideline = `\n\n## Multimodal Vision Guidance
 - When you are asked to analyze or describe an image, the image is passed natively in your multimodal context block.
 - You can directly see and analyze this image.
 - DO NOT use the 'read' or 'bash' tools to search for or read files like '用户上传的图片' or scan directory paths unless you are explicitly looking for a specific project file mentioned by path.`;
 
-  const stripGuideline = (prompt: string) => {
+  const tempGuideline = `\n\n## Workspace Clutter & Temporary Files Management
+- You MUST store all temporary execution scripts (e.g. search scripts, scratchpads, throwaway files) and their data results/outputs (e.g. text/JSON results, logs, fetched data files) inside the "Temp/" folder at the workspace root directory.
+- For example, if you create a search script, write it to "Temp/search_something.py" instead of "search_something.py".
+- If you write data results, output them to "Temp/result.txt" instead of "result.txt".
+- DO NOT write any temporary, scrap, or execution files directly in the root workspace directory to prevent clutter.`;
+
+  const stripGuidelines = (prompt: string) => {
     return (prompt || "").replace(/\\n\\n## Multimodal Vision Guidance[\\s\\S]*?mentioned by path\\./g, "")
-                         .replace(/\n\n## Multimodal Vision Guidance[\s\S]*?mentioned by path\./g, "");
+                         .replace(/\n\n## Multimodal Vision Guidance[\s\S]*?mentioned by path\./g, "")
+                         .replace(/\\n\\n## Workspace Clutter & Temporary Files Management[\\s\\S]*?to prevent clutter\\./g, "")
+                         .replace(/\n\n## Workspace Clutter & Temporary Files Management[\s\S]*?to prevent clutter\./g, "");
   };
 
+  let newPromptAdditions = tempGuideline;
   if (supportsVision) {
-    if (typeof inner._baseSystemPrompt === "string") {
-      inner._baseSystemPrompt = stripGuideline(inner._baseSystemPrompt) + guideline;
-    }
-    if (inner.agent?.state && typeof inner.agent.state.systemPrompt === "string") {
-      inner.agent.state.systemPrompt = stripGuideline(inner.agent.state.systemPrompt) + guideline;
-    }
-  } else {
-    if (typeof inner._baseSystemPrompt === "string") {
-      inner._baseSystemPrompt = stripGuideline(inner._baseSystemPrompt);
-    }
-    if (inner.agent?.state && typeof inner.agent.state.systemPrompt === "string") {
-      inner.agent.state.systemPrompt = stripGuideline(inner.agent.state.systemPrompt);
-    }
+    newPromptAdditions += visionGuideline;
+  }
+
+  if (typeof inner._baseSystemPrompt === "string") {
+    inner._baseSystemPrompt = stripGuidelines(inner._baseSystemPrompt) + newPromptAdditions;
+  }
+  if (inner.agent?.state && typeof inner.agent.state.systemPrompt === "string") {
+    inner.agent.state.systemPrompt = stripGuidelines(inner.agent.state.systemPrompt) + newPromptAdditions;
   }
 }
 
@@ -115,7 +119,7 @@ export class AgentSessionWrapper {
           throw new Error(`No API key found for provider "${activeModel.provider}". Please configure it in Models config.`);
         }
 
-        injectVisionGuideline(this.inner);
+        injectSystemGuidelines(this.inner);
 
         // Do not silently swallow synchronous preflight errors (like missing API keys).
         // Awaiting prompt() allows these errors to bubble up so the API router can catch them
@@ -167,7 +171,7 @@ export class AgentSessionWrapper {
           if (this.inner.agent.state) {
             (this.inner.agent.state as any).model = model;
           }
-          injectVisionGuideline(this.inner);
+          injectSystemGuidelines(this.inner);
           return { id: model.id, provider: model.provider };
         }
 
@@ -177,7 +181,7 @@ export class AgentSessionWrapper {
         const cleanModel = JSON.parse(JSON.stringify(model));
 
         await this.inner.setModel(cleanModel);
-        injectVisionGuideline(this.inner);
+        injectSystemGuidelines(this.inner);
         return { id: model.id, provider: model.provider };
       }
 
@@ -258,14 +262,14 @@ export class AgentSessionWrapper {
 
       case "steer": {
         const steerImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
-        injectVisionGuideline(this.inner);
+        injectSystemGuidelines(this.inner);
         await this.inner.steer(command.message as string, steerImages?.length ? steerImages : undefined);
         return null;
       }
 
       case "follow_up": {
         const followImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
-        injectVisionGuideline(this.inner);
+        injectSystemGuidelines(this.inner);
         await this.inner.followUp(command.message as string, followImages?.length ? followImages : undefined);
         return null;
       }
@@ -490,7 +494,7 @@ export async function startRpcSession(
 
     const wrapper = new AgentSessionWrapper(inner);
     wrapper.start();
-    injectVisionGuideline(inner);
+    injectSystemGuidelines(inner);
 
     const realSessionId = inner.sessionId as string;
     const realSessionFile = inner.sessionFile as string | undefined;
