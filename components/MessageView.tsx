@@ -643,14 +643,64 @@ function AssistantMessageView({
     voiceDesignPrompt?: string;
     voiceDesignActiveChips?: string[];
     voiceCloneActiveFile?: string;
+    modelId?: string;
   } | null>(null);
 
+  const mid = (isTtsModel(message.provider, message.model) ? message.model : (activeModel?.modelId || "")).toLowerCase();
+  const resolvedMid = (voiceSettings?.modelId || mid).toLowerCase();
+
+  // 1. Snapshot voice settings during active streaming to lock historical configuration
+  useEffect(() => {
+    if (isStreaming) {
+      try {
+        const globalStored = localStorage.getItem("mimo_voice_settings");
+        if (globalStored) {
+          const histStored = localStorage.getItem("mimo_history_voice_settings");
+          const history = histStored ? JSON.parse(histStored) : {};
+          
+          const settings = JSON.parse(globalStored);
+          settings.modelId = mid; // Preserve what model it generated under
+          
+          let changed = false;
+          const timeKey = String(message.timestamp);
+          if (JSON.stringify(history[timeKey]) !== JSON.stringify(settings)) {
+            history[timeKey] = settings;
+            changed = true;
+          }
+          if (entryId && JSON.stringify(history[entryId]) !== JSON.stringify(settings)) {
+            history[entryId] = settings;
+            changed = true;
+          }
+          
+          if (changed) {
+            localStorage.setItem("mimo_history_voice_settings", JSON.stringify(history));
+            window.dispatchEvent(new Event("mimo_history_voice_settings_changed"));
+          }
+        }
+      } catch (e) {
+        console.error("Failed to snapshot voice settings:", e);
+      }
+    }
+  }, [isStreaming, entryId, message.timestamp, mid]);
+
+  // 2. Reactively load settings prioritising history snapshots over global state
   useEffect(() => {
     const loadSettings = () => {
       try {
-        const stored = localStorage.getItem("mimo_voice_settings");
-        if (stored) {
-          setVoiceSettings(JSON.parse(stored));
+        const histStored = localStorage.getItem("mimo_history_voice_settings");
+        if (histStored) {
+          const history = JSON.parse(histStored);
+          const key = entryId || String(message.timestamp);
+          const snapshot = history[key];
+          if (snapshot) {
+            setVoiceSettings(snapshot);
+            return;
+          }
+        }
+        
+        const globalStored = localStorage.getItem("mimo_voice_settings");
+        if (globalStored) {
+          setVoiceSettings(JSON.parse(globalStored));
         }
       } catch (e) {
         console.error("Failed to load settings in MessageView:", e);
@@ -659,14 +709,15 @@ function AssistantMessageView({
 
     loadSettings();
     window.addEventListener("mimo_voice_settings_changed", loadSettings);
+    window.addEventListener("mimo_history_voice_settings_changed", loadSettings);
     return () => {
       window.removeEventListener("mimo_voice_settings_changed", loadSettings);
+      window.removeEventListener("mimo_history_voice_settings_changed", loadSettings);
     };
-  }, []);
+  }, [entryId, message.timestamp]);
 
-  const mid = (isTtsModel(message.provider, message.model) ? message.model : (activeModel?.modelId || "")).toLowerCase();
-  const isDesign = isVoiceDesignModel(undefined, mid);
-  const isClone = isVoiceCloneModel(undefined, mid);
+  const isDesign = isVoiceDesignModel(undefined, resolvedMid);
+  const isClone = isVoiceCloneModel(undefined, resolvedMid);
 
   const blocks = message.content ?? [];
   const [hovered, setHovered] = useState(false);

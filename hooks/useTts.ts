@@ -21,16 +21,35 @@ let globalActiveAudio: HTMLAudioElement | null = null;
 let globalActiveSetState: ((state: TtsState) => void) | null = null;
 
 // Helper to resolve active settings from localStorage to match the selected model
-function getVoiceParams(textContent: string, modelId?: string): VoiceParams {
+function getVoiceParams(textContent: string, modelId?: string, messageId?: string): VoiceParams {
   let finalVoice: string | undefined = undefined;
   let finalModelId = modelId;
   let finalVoiceDesignPrompt: string | undefined = undefined;
 
   try {
-    const stored = typeof window !== "undefined" ? localStorage.getItem("mimo_voice_settings") : null;
-    if (stored) {
-      const settings = JSON.parse(stored);
-      const mid = (modelId || "").toLowerCase();
+    let settings: any = null;
+    
+    // 1. Try to load from history snapshot
+    if (messageId) {
+      const histStored = typeof window !== "undefined" ? localStorage.getItem("mimo_history_voice_settings") : null;
+      if (histStored) {
+        const history = JSON.parse(histStored);
+        settings = history[messageId];
+      }
+    }
+    
+    // 2. Fallback to global settings
+    if (!settings) {
+      const stored = typeof window !== "undefined" ? localStorage.getItem("mimo_voice_settings") : null;
+      if (stored) {
+        settings = JSON.parse(stored);
+      }
+    }
+
+    if (settings) {
+      const resolvedModelId = settings.modelId || modelId || "";
+      const mid = resolvedModelId.toLowerCase();
+      finalModelId = settings.modelId || modelId;
 
       if (mid.includes("voicedesign") || mid.includes("design")) {
         finalVoice = undefined; // For voicedesign, voice parameter must be omitted/undefined
@@ -108,7 +127,7 @@ export function useTts(messageId: string, textContent: string, modelId?: string)
   // Pre-load from cache and sync on voice settings change
   useEffect(() => {
     const checkCache = async () => {
-      const params = getVoiceParams(textContent, modelId);
+      const params = getVoiceParams(textContent, modelId, messageId);
       const cached = await getCachedAudio(params);
       setAudioUrl(cached);
     };
@@ -116,10 +135,12 @@ export function useTts(messageId: string, textContent: string, modelId?: string)
     checkCache();
 
     window.addEventListener("mimo_voice_settings_changed", checkCache);
+    window.addEventListener("mimo_history_voice_settings_changed", checkCache);
     return () => {
       window.removeEventListener("mimo_voice_settings_changed", checkCache);
+      window.removeEventListener("mimo_history_voice_settings_changed", checkCache);
     };
-  }, [textContent, modelId]);
+  }, [textContent, modelId, messageId]);
 
   const stopGlobal = () => {
     if (globalActiveAudio) {
@@ -147,7 +168,7 @@ export function useTts(messageId: string, textContent: string, modelId?: string)
 
     try {
       const activeModelId = incomingModelId || modelId;
-      const params = getVoiceParams(textContent, activeModelId);
+      const params = getVoiceParams(textContent, activeModelId, messageId);
       if (style) params.style = style;
       if (voice) params.voice = voice;
 
