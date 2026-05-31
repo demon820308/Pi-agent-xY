@@ -7,6 +7,8 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vs } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import { useTheme } from "@/hooks/useTheme";
+import { useTts } from "@/hooks/useTts";
+import { isTtsModel, cleanSpeechText, isVoiceCloneModel, isVoiceDesignModel } from "@/lib/tts-utils";
 import type {
   AgentMessage,
   UserMessage,
@@ -32,6 +34,8 @@ interface Props {
   onEditContent?: (content: string) => void;
   showTimestamp?: boolean;
   prevTimestamp?: number;
+  activeModel?: { provider: string; modelId: string } | null;
+  prevUserContent?: string;
 }
 
 function formatTime(ts?: number): string | null {
@@ -66,7 +70,7 @@ function copyText(text: string): Promise<void> {
   }
 }
 
-export function MessageView({ message, isStreaming, toolResults, modelNames, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp }: Props) {
+export function MessageView({ message, isStreaming, toolResults, modelNames, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, activeModel, prevUserContent }: Props) {
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
 
   const lightbox = zoomedImage && (
@@ -149,7 +153,7 @@ export function MessageView({ message, isStreaming, toolResults, modelNames, ent
   if (message.role === "assistant") {
     return (
       <>
-        <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} onZoomImage={setZoomedImage} />
+        <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} onZoomImage={setZoomedImage} activeModel={activeModel} entryId={entryId} prevUserContent={prevUserContent} />
         {lightbox}
       </>
     );
@@ -370,6 +374,9 @@ function AssistantMessageView({
   showTimestamp,
   prevTimestamp,
   onZoomImage,
+  activeModel,
+  entryId,
+  prevUserContent,
 }: {
   message: AssistantMessage;
   isStreaming?: boolean;
@@ -378,8 +385,41 @@ function AssistantMessageView({
   showTimestamp?: boolean;
   prevTimestamp?: number;
   onZoomImage?: (src: string) => void;
+  activeModel?: { provider: string; modelId: string } | null;
+  entryId?: string;
+  prevUserContent?: string;
 }) {
   const time = showTimestamp ? formatTime(message.timestamp) : null;
+  const [voiceSettings, setVoiceSettings] = useState<{
+    presetVoice?: string;
+    voiceDesignPrompt?: string;
+    voiceDesignActiveChips?: string[];
+    voiceCloneActiveFile?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    const loadSettings = () => {
+      try {
+        const stored = localStorage.getItem("mimo_voice_settings");
+        if (stored) {
+          setVoiceSettings(JSON.parse(stored));
+        }
+      } catch (e) {
+        console.error("Failed to load settings in MessageView:", e);
+      }
+    };
+
+    loadSettings();
+    window.addEventListener("mimo_voice_settings_changed", loadSettings);
+    return () => {
+      window.removeEventListener("mimo_voice_settings_changed", loadSettings);
+    };
+  }, []);
+
+  const mid = (isTtsModel(message.provider, message.model) ? message.model : (activeModel?.modelId || "")).toLowerCase();
+  const isDesign = isVoiceDesignModel(undefined, mid);
+  const isClone = isVoiceCloneModel(undefined, mid);
+
   const blocks = message.content ?? [];
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -419,6 +459,14 @@ function AssistantMessageView({
     .filter((b): b is TextContent => b.type === "text")
     .map((b) => b.text)
     .join("\n");
+
+  const showTts = isTtsModel(activeModel?.provider, activeModel?.modelId) || isTtsModel(message.provider, message.model);
+
+  const effectiveText = cleanSpeechText(textContent || prevUserContent || "");
+
+  const { isPlaying, isLoading, error: ttsError, play, pause, audioUrl } = useTts(entryId || String(message.timestamp), effectiveText, mid);
+
+  const isFallback = !textContent && showTts && prevUserContent;
 
   const copyContent = () => {
     copyText(textContent).then(() => {
@@ -539,6 +587,26 @@ function AssistantMessageView({
         {blocks.map((block, i) => (
           <BlockView key={i} block={block} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(i) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} onZoomImage={onZoomImage} />
         ))}
+        {isFallback && (
+          <div style={{
+            border: "1px dashed rgba(59,130,246,0.35)",
+            background: "rgba(59,130,246,0.015)",
+            borderRadius: 8,
+            padding: "10px 14px",
+            fontSize: 13,
+            color: "var(--text)",
+            lineHeight: 1.6,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--accent)", fontWeight: 600, marginBottom: 6 }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+              </svg>
+              待播报文本 (Speech prompt text):
+            </div>
+            <div style={{ whiteSpace: "pre-wrap", color: "var(--text-muted)", fontSize: 12.5 }}>{prevUserContent}</div>
+          </div>
+        )}
         {isStreaming && blocks.length === 0 && (
           <div style={{ 
             display: "flex", 
@@ -613,6 +681,174 @@ function AssistantMessageView({
             )}
             {copied ? "Copied" : "Copy"}
           </button>
+        )}
+        {showTts && effectiveText && !isStreaming && (
+          <div style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 2 }}>
+            <button
+              onClick={() => isPlaying ? pause() : play(undefined, undefined, isTtsModel(message.provider, message.model) ? message.model : (activeModel?.modelId || message.model))}
+              title={isPlaying ? "暂停播放" : audioUrl ? "播放已生成的语音" : "生成并播放语音"}
+              style={{
+                display: "flex", alignItems: "center", gap: 4,
+                padding: "3px 8px", height: 22,
+                background: "none", border: "none",
+                borderRadius: 5,
+                color: isPlaying ? "var(--accent)" : "var(--text-dim)",
+                cursor: isLoading ? "not-allowed" : "pointer",
+                fontSize: 11, fontWeight: 400,
+                whiteSpace: "nowrap",
+                opacity: 1,
+                pointerEvents: "auto",
+                transition: "color 0.12s",
+              }}
+              disabled={isLoading}
+              onMouseEnter={(e) => { if (!isPlaying) e.currentTarget.style.color = "var(--accent)"; }}
+              onMouseLeave={(e) => { if (!isPlaying) e.currentTarget.style.color = "var(--text-dim)"; }}
+            >
+              {isLoading ? (
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "spin 1s linear infinite" }}>
+                   <circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.2)" />
+                   <path d="M12 2a10 10 0 0 1 10 10" />
+                </svg>
+              ) : isPlaying ? (
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" />
+                </svg>
+              ) : (
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                  <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                </svg>
+              )}
+              {isLoading ? "生成中..." : isPlaying ? "播放中" : audioUrl ? "播放" : "生成并播放"}
+            </button>
+
+            {audioUrl && (
+              <button
+                onClick={() => {
+                  const a = document.createElement("a");
+                  a.href = audioUrl;
+                  const randId = Math.floor(100000 + Math.random() * 900000);
+                  let modelType = "tts";
+                  if (isClone) modelType = "voiceclone";
+                  else if (isDesign) modelType = "voicedesign";
+                  a.download = `mimo-${modelType}-${randId}.mp3`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                }}
+                title="下载语音文件 (Download MP3)"
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  padding: "3px", width: 22, height: 22,
+                  background: "none", border: "none",
+                  borderRadius: 5,
+                  color: "var(--text-dim)",
+                  cursor: "pointer",
+                  transition: "color 0.12s",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+              </button>
+            )}
+
+            {voiceSettings && (() => {
+              let icon = "🎙️";
+              let label = "";
+              let color = "var(--text-dim)";
+              let bg = "var(--bg-panel)";
+              let border = "1px solid var(--border)";
+
+              if (isDesign) {
+                icon = "🧩";
+                const chips = voiceSettings.voiceDesignActiveChips || [];
+                label = chips.length > 0 ? chips.join(" / ") : "自定义声线";
+                color = "var(--accent)";
+                bg = "rgba(59,130,246,0.06)";
+                border = "1px solid rgba(59,130,246,0.15)";
+              } else if (isClone) {
+                icon = "🎙️";
+                label = voiceSettings.voiceCloneActiveFile ? `声线克隆: ${voiceSettings.voiceCloneActiveFile}` : "未选择克隆声源";
+                color = "#10b981";
+                bg = "rgba(16,185,129,0.06)";
+                border = "1px solid rgba(16,185,129,0.15)";
+              } else {
+                icon = "🌸";
+                const vMap: Record<string, string> = {
+                  "mimo_default": "冰糖 (默认)",
+                  "茉莉": "茉莉 (温柔女)",
+                  "苏打": "苏打 (活力男)",
+                  "白桦": "白桦 (稳重男)",
+                  "Chloe": "Chloe (英音女)",
+                  "Mia": "Mia (美音女)",
+                  "Milo": "Milo (美音男)",
+                  "Dean": "Dean (澳音男)"
+                };
+                const vName = vMap[voiceSettings.presetVoice || "mimo_default"] || voiceSettings.presetVoice || "冰糖 (默认)";
+                label = `官方声线: ${vName}`;
+                color = "var(--text-muted)";
+                bg = "rgba(255,255,255,0.02)";
+                border = "1px solid var(--border)";
+              }
+
+              return (
+                <span 
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    padding: "2px 8px",
+                    borderRadius: 6,
+                    fontSize: 10.5,
+                    color,
+                    background: bg,
+                    border,
+                    marginLeft: 6,
+                    height: 22,
+                    pointerEvents: "none",
+                    whiteSpace: "nowrap",
+                    opacity: 1,
+                  }}
+                  title={label}
+                >
+                  <span>{icon}</span>
+                  <span style={{ fontWeight: 500 }}>{label}</span>
+                </span>
+              );
+            })()}
+
+            {isPlaying && (
+              <div style={{ display: "flex", gap: 1.5, alignItems: "flex-end", height: 11, marginLeft: 2, marginRight: 2 }}>
+                <style>{`
+                  @keyframes ttsJump {
+                    0%, 100% { height: 3px; }
+                    50% { height: 11px; }
+                  }
+                  .tts-wave-bar {
+                    width: 2px;
+                    background: var(--accent);
+                    border-radius: 1px;
+                  }
+                `}</style>
+                <span className="tts-wave-bar" style={{ height: 6, animation: "ttsJump 0.8s ease-in-out infinite" }} />
+                <span className="tts-wave-bar" style={{ height: 11, animation: "ttsJump 0.8s ease-in-out infinite 0.15s" }} />
+                <span className="tts-wave-bar" style={{ height: 4, animation: "ttsJump 0.8s ease-in-out infinite 0.3s" }} />
+                <span className="tts-wave-bar" style={{ height: 8, animation: "ttsJump 0.8s ease-in-out infinite 0.45s" }} />
+              </div>
+            )}
+
+            {ttsError && (
+              <span style={{ fontSize: 10, color: "#ef4444", marginLeft: 4 }} title={ttsError}>
+                ⚠️ Play error
+              </span>
+            )}
+          </div>
         )}
         {time && !isStreaming && (
           <span style={{ fontSize: 10, color: "var(--text-dim)", marginLeft: "auto" }}>{time}</span>

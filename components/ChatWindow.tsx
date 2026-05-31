@@ -337,6 +337,16 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                   msg.role === "user" && idx > 0 && messages[idx - 1].role === "assistant"
                     ? entryIds[idx - 1]
                     : undefined;
+                
+                const prevUserContent = msg.role === "assistant" && idx > 0 && messages[idx - 1].role === "user"
+                  ? (typeof messages[idx - 1].content === "string"
+                      ? messages[idx - 1].content
+                      : (messages[idx - 1].content as any)
+                          .filter((b: any) => b.type === "text")
+                          .map((b: any) => b.text)
+                          .join("\n"))
+                  : undefined;
+
                 const isVisible = msg.role === "user" || msg.role === "assistant";
                 const currentRefIdx = isVisible ? refIdx++ : -1;
                 let showTimestamp = false;
@@ -366,6 +376,8 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     onEditContent={(content) => chatInputRef?.current?.insertIfEmpty(content)}
                     showTimestamp={showTimestamp}
                     prevTimestamp={idx > 0 ? (messages[idx - 1] as import("@/lib/types").AgentMessage & { timestamp?: number }).timestamp : undefined}
+                    activeModel={displayModelValue}
+                    prevUserContent={prevUserContent}
                   />
                 );
                 if (!isVisible) return view;
@@ -379,10 +391,26 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 );
               });
             })()}
-
-            {streamState.isStreaming && streamState.streamingMessage && (
-              <MessageView message={streamState.streamingMessage as AgentMessage} isStreaming modelNames={modelNames} />
-            )}
+            {streamState.isStreaming && streamState.streamingMessage && (() => {
+              const lastUserMessage = messages.length > 0 && messages[messages.length - 1].role === "user" ? messages[messages.length - 1] : null;
+              const streamingPrevUserContent = lastUserMessage
+                ? (typeof lastUserMessage.content === "string"
+                    ? lastUserMessage.content
+                    : (lastUserMessage.content as any)
+                        .filter((b: any) => b.type === "text")
+                        .map((b: any) => b.text)
+                        .join("\n"))
+                : undefined;
+              return (
+                <MessageView 
+                  message={streamState.streamingMessage as AgentMessage} 
+                  isStreaming 
+                  modelNames={modelNames} 
+                  activeModel={displayModelValue} 
+                  prevUserContent={streamingPrevUserContent}
+                />
+              );
+            })()}
 
             {agentRunning && !streamState.streamingMessage && (
               <div className="py-2 text-[13px] text-text-muted">

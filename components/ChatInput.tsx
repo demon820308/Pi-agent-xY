@@ -2,6 +2,7 @@
 
 import React, { useRef, useState, useCallback, useEffect, useImperativeHandle, forwardRef, KeyboardEvent } from "react";
 import { isVisionModel } from "@/lib/vision";
+import { isTtsModel, isVoiceDesignModel, isVoiceCloneModel, isBaseTtsModel } from "@/lib/tts-utils";
 import { encodeFilePathForApi, joinFilePath } from "@/lib/file-paths";
 
 export interface AttachedImage {
@@ -274,12 +275,223 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [copySuccess, setCopySuccess] = useState(false);
   const [promptTab, setPromptTab] = useState<"text" | "json">("text");
 
+  const isTts = model ? isTtsModel(model.provider, model.modelId) : false;
+
+  // Model-Adaptive Voice Workspace States
+  const [voiceConsoleOpen, setVoiceConsoleOpen] = useState(false);
+  const [presetVoice, setPresetVoice] = useState("mimo_default");
+  const [voiceDesignPrompt, setVoiceDesignPrompt] = useState("");
+  const [voiceDesignActiveChips, setVoiceDesignActiveChips] = useState<string[]>([]);
+  const [voiceCloneActiveFile, setVoiceCloneActiveFile] = useState<string | null>(null);
+  const [voiceCloneAudioData, setVoiceCloneAudioData] = useState<string | null>(null);
+  const [voiceDesignLibrary, setVoiceDesignLibrary] = useState<{ name: string; prompt: string; chips: string[] }[]>([]);
+
+  // Load voice settings on mount
   useEffect(() => {
-    if (describeError) {
-      const timer = setTimeout(() => setDescribeError(null), 8000);
-      return () => clearTimeout(timer);
+    try {
+      const stored = localStorage.getItem("mimo_voice_settings");
+      if (stored) {
+        const settings = JSON.parse(stored);
+        if (settings.presetVoice) setPresetVoice(settings.presetVoice);
+        if (settings.voiceDesignPrompt) setVoiceDesignPrompt(settings.voiceDesignPrompt);
+        if (settings.voiceDesignActiveChips) setVoiceDesignActiveChips(settings.voiceDesignActiveChips);
+        if (settings.voiceCloneActiveFile) setVoiceCloneActiveFile(settings.voiceCloneActiveFile);
+        if (settings.voiceCloneAudioData) setVoiceCloneAudioData(settings.voiceCloneAudioData);
+      }
+      
+      const libStored = localStorage.getItem("mimo_voice_design_library");
+      if (libStored) {
+        setVoiceDesignLibrary(JSON.parse(libStored));
+      } else {
+        const defaultLib = [
+          { name: "👑 金牌客服", prompt: "A sweet young female voice with clear, sweet texture, gentle and patient temperament, speaking standard Mandarin.", chips: ["青年女 👩", "清脆甜美 🍬", "温柔耐心 🌸", "标准国语"] },
+          { name: "🎙️ 知性主播", prompt: "A thirty-year-old mature female voice with intellectual, calm, and composed presenter temperament, speaking standard Mandarin.", chips: ["青年女 👩", "富有磁性 🧲", "知性稳重 📚", "标准国语"] },
+          { name: "📖 故事说书人", prompt: "A middle-aged male voice with husky, deep, and magnetic texture, nostalgic and storytelling vibe, speaking standard Mandarin.", chips: ["大叔男 🧔", "深沉低沉 🎙️", "慵懒随性 ☕", "标准国语"] }
+        ];
+        localStorage.setItem("mimo_voice_design_library", JSON.stringify(defaultLib));
+        setVoiceDesignLibrary(defaultLib);
+      }
+    } catch (e) {
+      console.error("Failed to load mimo voice settings:", e);
     }
-  }, [describeError]);
+  }, []);
+
+  // Save voice settings on change
+  useEffect(() => {
+    try {
+      const settings = {
+        presetVoice,
+        voiceDesignPrompt,
+        voiceDesignActiveChips,
+        voiceCloneActiveFile,
+        voiceCloneAudioData
+      };
+      localStorage.setItem("mimo_voice_settings", JSON.stringify(settings));
+      window.dispatchEvent(new Event("mimo_voice_settings_changed"));
+    } catch (e) {
+      console.error("Failed to save mimo voice settings:", e);
+    }
+  }, [presetVoice, voiceDesignPrompt, voiceDesignActiveChips, voiceCloneActiveFile, voiceCloneAudioData]);
+
+  // Help translate designer chips into natural English prompts
+  const compilePromptFromChips = (chips: string[]) => {
+    if (chips.length === 0) return "";
+    const translations: Record<string, string> = {
+      "青年女 👩": "young female voice",
+      "青年男 👨": "young male voice",
+      "大叔男 🧔": "mature middle-aged male voice",
+      "幼态少女 👧": "lively young girl voice",
+      "白发老者 👴": "elderly grandfather male voice",
+      "沙哑 🍂": "husky and raspy vocal texture",
+      "清脆甜美 🍬": "crisp and sweet vocal texture",
+      "富有磁性 🧲": "magnetic and charming voice",
+      "深沉低沉 🎙️": "deep and low-pitched vocal texture",
+      "浑厚中气 🔊": "full-bodied and resonant voice",
+      "知性稳重 📚": "intellectual, calm, and composed presenter temperament",
+      "温柔耐心 🌸": "gentle, soft, and extremely patient temperament",
+      "阳光活泼 ☀️": "bright, energetic, and highly enthusiastic temperament",
+      "严肃冷酷 ❄️": "stern, cold, and serious tone",
+      "慵懒随性 ☕": "lazy, relaxed, and casual conversational tone",
+      "标准国语": "speaking standard Mandarin",
+      "川普口音": "speaking standard Mandarin with a charming Sichuan dialect accent",
+      "粤普口音": "speaking standard Mandarin with a subtle Cantonese dialect accent",
+      "东北口音": "speaking standard Mandarin with a noticeable Northeast dialect accent",
+      "英普口音": "speaking standard Mandarin with a slight English accent"
+    };
+    
+    const translated = chips.map(c => translations[c] || c);
+    return `A beautiful ${translated.join(", ")}.`;
+  };
+
+  const saveCurrentTimbre = () => {
+    const name = prompt("请输入此音色的专属名称（例如：我的冷酷大叔音）：");
+    if (name && name.trim()) {
+      const newLib = [...voiceDesignLibrary, { name: name.trim(), prompt: voiceDesignPrompt, chips: voiceDesignActiveChips }];
+      setVoiceDesignLibrary(newLib);
+      localStorage.setItem("mimo_voice_design_library", JSON.stringify(newLib));
+    }
+  };
+
+  const deleteSavedTimbre = (name: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm(`确定要删除自定义音色 "${name}" 吗？`)) {
+      const newLib = voiceDesignLibrary.filter(item => item.name !== name);
+      setVoiceDesignLibrary(newLib);
+      localStorage.setItem("mimo_voice_design_library", JSON.stringify(newLib));
+    }
+  };
+
+  const selectFileForCloning = (file: File, fileName: string) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      if (e.target?.result && typeof e.target.result === "string") {
+        let result = e.target.result;
+        // If it is recorded webm audio, trans-label the base64 prefix to audio/wav 
+        // to bypass strict Xiaomi voice clone format restrictions.
+        if (result.startsWith("data:audio/webm;")) {
+          result = result.replace("data:audio/webm;", "data:audio/wav;");
+        }
+        setVoiceCloneAudioData(result);
+        setVoiceCloneActiveFile(fileName);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const insertAudioTag = (tag: string) => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const curVal = value;
+    const newVal = curVal.substring(0, start) + ` [${tag}] ` + curVal.substring(end);
+    setValue(newVal);
+    
+    setTimeout(() => {
+      ta.focus();
+      const newPos = start + tag.length + 4;
+      ta.setSelectionRange(newPos, newPos);
+    }, 10);
+  };
+
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
+    };
+  }, []);
+
+  const startRecording = async () => {
+    if (typeof window === "undefined" || !navigator.mediaDevices) {
+      setDescribeError("您的浏览器不支持麦克风录音设备。");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const options = { mimeType: "audio/webm" };
+      
+      let recorder: MediaRecorder;
+      try {
+        recorder = new MediaRecorder(stream, options);
+      } catch (e) {
+        recorder = new MediaRecorder(stream);
+      }
+
+      mediaRecorderRef.current = recorder;
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        const ext = recorder.mimeType?.includes("webm") ? "webm" : "wav";
+        const audioFile = new File([audioBlob], `voice_record_${Date.now()}.${ext}`, { type: audioBlob.type });
+        processFiles([audioFile]);
+        
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      recorder.start();
+      setIsRecording(true);
+      setRecordingSeconds(0);
+      
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((s) => s + 1);
+      }, 1000);
+
+    } catch (err: any) {
+      console.error("Failed to start recording:", err);
+      setDescribeError("麦克风启动失败，请检查浏览器是否已授权麦克风权限！");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+  };
+
+  const formatTimeSeconds = (secs: number) => {
+    const m = Math.floor(secs / 60).toString().padStart(2, "0");
+    const s = (secs % 60).toString().padStart(2, "0");
+    return `${m}:${s}`;
+  };
+
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -389,11 +601,7 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
 }
 
   const processImageFiles = useCallback(async (files: File[]) => {
-    const imageFiles = files.filter((f) => {
-      if (f.type && f.type.startsWith("image/")) return true;
-      const ext = f.name.toLowerCase().split('.').pop();
-      return ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"].includes(ext || "");
-    });
+    const imageFiles = files.filter((f) => f.type.startsWith("image/"));
     if (!imageFiles.length) return;
     try {
       const newImages = await Promise.all(
@@ -871,6 +1079,37 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
           </div>
         )}
 
+        {/* Recording status banner */}
+        {isRecording && (
+          <div style={{
+            marginBottom: 8, padding: "8px 12px",
+            background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)",
+            borderRadius: 8, fontSize: 12, color: "#ef4444",
+            display: "flex", alignItems: "center", gap: 8,
+          }}>
+            <style>{`
+              @keyframes recordPulse {
+                0% { opacity: 0.4; }
+                50% { opacity: 1; }
+                100% { opacity: 0.4; }
+              }
+            `}</style>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#ef4444", display: "inline-block", animation: "recordPulse 1s infinite" }} />
+            <span style={{ fontWeight: 600 }}>麦克风录制中:</span>
+            <span style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>{formatTimeSeconds(recordingSeconds)}</span>
+            <button
+              onClick={stopRecording}
+              style={{
+                marginLeft: "auto", padding: "2px 8px", background: "#ef4444", border: "none",
+                borderRadius: 4, color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer",
+                boxShadow: "0 1px 3px rgba(239,68,68,0.3)",
+              }}
+            >
+              停止录音并添加至附件
+            </button>
+          </div>
+        )}
+
         {/* Upload status banner */}
         {isUploading && (
           <div style={{
@@ -955,6 +1194,352 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
           </div>
         )}
 
+
+        {/* Adaptive Voice Workspace & Audio Tag Assistant */}
+        {isTts && (() => {
+          const modelIdStr = model?.modelId || "";
+          const isBaseTts = isBaseTtsModel(model?.provider, modelIdStr);
+          const isVoiceDesign = isVoiceDesignModel(model?.provider, modelIdStr);
+          const isVoiceClone = isVoiceCloneModel(model?.provider, modelIdStr);
+
+          return (
+            <>
+              {/* Tag Assistant */}
+              <div style={{
+                display: "flex",
+                gap: 6,
+                marginBottom: 6,
+                alignItems: "center",
+                flexWrap: "wrap",
+                background: "rgba(var(--accent-rgb), 0.03)",
+                padding: "6px 10px",
+                borderRadius: 8,
+                border: "1px solid var(--border)"
+              }}>
+                <span style={{ fontSize: 10, color: "var(--text-dim)", fontWeight: 600 }}>💨 音频标签助手：</span>
+                {[
+                  { label: "吸气", tag: "inhale", icon: "💨" },
+                  { label: "大笑", tag: "laughter", icon: "😂" },
+                  { label: "叹气", tag: "sigh", icon: "😮‍💨" },
+                  { label: "啜泣", tag: "sob", icon: "😢" },
+                  { label: "咳嗽", tag: "cough", icon: "😷" }
+                ].map(t => (
+                  <button
+                    key={t.tag}
+                    type="button"
+                    onClick={() => insertAudioTag(t.tag)}
+                    style={{
+                      padding: "2px 8px",
+                      borderRadius: 4,
+                      fontSize: 10,
+                      border: "1px solid var(--border)",
+                      background: "var(--bg-panel)",
+                      color: "var(--text-muted)",
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 2,
+                      transition: "all 0.12s"
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "var(--bg-panel)"; e.currentTarget.style.color = "var(--text-muted)"; }}
+                  >
+                    <span>{t.icon}</span>
+                    <span>{t.label}</span>
+                  </button>
+                ))}
+                <span style={{ fontSize: 9, color: "var(--text-dim)", marginLeft: "auto" }}>
+                  点击在光标处插入标签
+                </span>
+              </div>
+
+              {/* Voice Workspace Popover Panel */}
+              {voiceConsoleOpen && (
+                <div style={{
+                  marginBottom: 10,
+                  padding: 16,
+                  background: "var(--bg-panel)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 12,
+                  boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                  transition: "all 0.2s ease-in-out"
+                }}>
+                  {/* Header */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border)", paddingBottom: 8 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", display: "flex", alignItems: "center", gap: 6 }}>
+                      🎙️ AI 声音工坊
+                      <span style={{ fontSize: 11, fontWeight: 400, color: "var(--accent)", background: "rgba(var(--accent-rgb), 0.1)", padding: "1px 6px", borderRadius: 4 }}>
+                        {isBaseTts && "标准朗读模式"}
+                        {isVoiceDesign && "自定义声线塑造"}
+                        {isVoiceClone && "高真声音克隆"}
+                      </span>
+                    </span>
+                    <button 
+                      type="button"
+                      onClick={() => setVoiceConsoleOpen(false)}
+                      style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 11 }}
+                    >
+                      收起 ✕
+                    </button>
+                  </div>
+
+                  {/* 1. Base TTS Preset Selection */}
+                  {isBaseTts && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}>请选择内置高质感官方声线：</span>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {[
+                          { name: "冰糖 🍬 (国语女)", id: "mimo_default" },
+                          { name: "茉莉 🌸 (温柔女)", id: "茉莉" },
+                          { name: "苏打 🥛 (活力男)", id: "苏打" },
+                          { name: "白桦 🌲 (稳重男)", id: "白桦" },
+                          { name: "Chloe 🇬🇧 (英音女)", id: "Chloe" },
+                          { name: "Mia 🇺🇸 (美音女)", id: "Mia" },
+                          { name: "Milo 🇨🇦 (美音男)", id: "Milo" },
+                          { name: "Dean 🦘 (澳音男)", id: "Dean" }
+                        ].map(v => {
+                          const isActive = presetVoice === v.id;
+                          return (
+                            <button
+                              key={v.id}
+                              type="button"
+                              onClick={() => setPresetVoice(v.id)}
+                              style={{
+                                padding: "4px 10px",
+                                borderRadius: 6,
+                                fontSize: 11,
+                                border: isActive ? "1px solid var(--accent)" : "1px solid var(--border)",
+                                background: isActive ? "var(--bg-selected)" : "none",
+                                color: isActive ? "var(--text)" : "var(--text-muted)",
+                                cursor: "pointer",
+                                fontWeight: isActive ? 600 : 400,
+                                transition: "all 0.12s"
+                              }}
+                              onMouseEnter={e => { if(!isActive) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                              onMouseLeave={e => { if(!isActive) e.currentTarget.style.background = "none"; }}
+                            >
+                              {v.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 2. Voice Design Console */}
+                  {isVoiceDesign && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      {/* Template Library */}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", display: "flex", justifyContent: "space-between" }}>
+                          <span>👑 我的声线库：</span>
+                          <button 
+                            type="button"
+                            onClick={saveCurrentTimbre} 
+                            disabled={!voiceDesignPrompt}
+                            style={{ background: "none", border: "none", color: "var(--accent)", fontSize: 11, cursor: "pointer", fontWeight: 600 }}
+                          >
+                            ＋ 保存当前声线组合
+                          </button>
+                        </span>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {voiceDesignLibrary.map((item, idx) => {
+                            const isActive = voiceDesignPrompt === item.prompt;
+                            return (
+                              <div
+                                key={idx}
+                                onClick={() => {
+                                  setVoiceDesignPrompt(item.prompt);
+                                  setVoiceDesignActiveChips(item.chips);
+                                }}
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 4,
+                                  padding: "3px 8px",
+                                  borderRadius: 6,
+                                  fontSize: 11,
+                                  border: isActive ? "1px solid var(--accent)" : "1px solid var(--border)",
+                                  background: isActive ? "var(--bg-selected)" : "none",
+                                  color: isActive ? "var(--text)" : "var(--text-muted)",
+                                  cursor: "pointer",
+                                  transition: "all 0.12s"
+                                }}
+                              >
+                                <span>{item.name}</span>
+                                {idx >= 3 && (
+                                  <span 
+                                    onClick={(e) => deleteSavedTimbre(item.name, e)}
+                                    style={{ color: "var(--text-dim)", marginLeft: 4, fontSize: 10, cursor: "pointer" }}
+                                    title="删除此声线"
+                                  >
+                                    ✕
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Timbre Matrix Constructor */}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8, borderTop: "1px dashed var(--border)", paddingTop: 10 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}>🧩 声线塑造魔方（自由勾选实时拼装）：</span>
+                        
+                        {[
+                          {
+                            title: "性别年龄",
+                            chips: ["青年女 👩", "青年男 👨", "大叔男 🧔", "幼态少女 👧", "白发老者 👴"]
+                          },
+                          {
+                            title: "嗓音特质",
+                            chips: ["沙哑 🍂", "清脆甜美 🍬", "富有磁性 🧲", "深沉低沉 🎙️", "浑厚中气 🔊"]
+                          },
+                          {
+                            title: "性格气质",
+                            chips: ["知性稳重 📚", "温柔耐心 🌸", "阳光活泼 ☀️", "严肃冷酷 ❄️", "慵懒随性 ☕"]
+                          },
+                          {
+                            title: "语言口音",
+                            chips: ["标准国语", "川普口音", "粤普口音", "东北口音", "英普口音"]
+                          }
+                        ].map(cat => (
+                          <div key={cat.title} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                            <span style={{ fontSize: 10, color: "var(--text-dim)", width: 55, flexShrink: 0 }}>{cat.title}：</span>
+                            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                              {cat.chips.map(chip => {
+                                const isSelected = voiceDesignActiveChips.includes(chip);
+                                return (
+                                  <button
+                                    key={chip}
+                                    type="button"
+                                    onClick={() => {
+                                      let nextChips: string[];
+                                      if (isSelected) {
+                                        nextChips = voiceDesignActiveChips.filter(c => c !== chip);
+                                      } else {
+                                        nextChips = [...voiceDesignActiveChips, chip];
+                                      }
+                                      setVoiceDesignActiveChips(nextChips);
+                                      setVoiceDesignPrompt(compilePromptFromChips(nextChips));
+                                    }}
+                                    style={{
+                                      padding: "2px 8px",
+                                      borderRadius: 4,
+                                      fontSize: 10,
+                                      border: isSelected ? "1px solid var(--accent)" : "1px solid var(--border)",
+                                      background: isSelected ? "var(--bg-selected)" : "none",
+                                      color: isSelected ? "var(--text)" : "var(--text-muted)",
+                                      cursor: "pointer",
+                                      transition: "all 0.12s"
+                                    }}
+                                  >
+                                    {chip}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Prompt Preview */}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6, borderTop: "1px dashed var(--border)", paddingTop: 10 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}>📝 生成的声线描述 (Timbre Prompt)：</span>
+                        <textarea
+                          value={voiceDesignPrompt}
+                          onChange={(e) => setVoiceDesignPrompt(e.target.value)}
+                          rows={2}
+                          placeholder="点击上方魔方自动组装声线，或在此手动撰写..."
+                          style={{
+                            width: "100%",
+                            padding: 8,
+                            fontSize: 11,
+                            borderRadius: 6,
+                            border: "1px solid var(--border)",
+                            background: "var(--bg)",
+                            color: "var(--text)",
+                            fontFamily: "var(--font-mono)",
+                            resize: "none"
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 3. Voice Clone Reference Selection */}
+                  {isVoiceClone && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}>🔊 声线克隆提取器 (Voice Clone Source)：</span>
+                      {(() => {
+                        const audioFiles = attachedFiles.filter(f => 
+                          f.name.endsWith(".wav") || 
+                          f.name.endsWith(".webm") || 
+                          f.name.endsWith(".mp3") || 
+                          f.name.endsWith(".m4a")
+                        );
+
+                        if (audioFiles.length === 0) {
+                          return (
+                            <div style={{
+                              padding: "16px 12px",
+                              border: "1px dashed var(--border)",
+                              borderRadius: 8,
+                              fontSize: 11,
+                              color: "var(--text-muted)",
+                              textAlign: "center",
+                              lineHeight: "1.6"
+                            }}>
+                              💡 请先在左下角点击麦克风 🎤 录制您的声音，或点击别针 📎 上传一段录音（WAV/MP3），然后在此选中它以提取克隆声线！
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            <span style={{ fontSize: 10, color: "var(--text-dim)" }}>检测到已上传的音频附件，点击指定为当前克隆声源：</span>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                              {audioFiles.map((fileObj, idx) => {
+                                const isSelected = voiceCloneActiveFile === fileObj.name;
+                                return (
+                                  <div
+                                    key={idx}
+                                    onClick={() => selectFileForCloning(fileObj.file, fileObj.name)}
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "space-between",
+                                      padding: "6px 12px",
+                                      borderRadius: 6,
+                                      border: isSelected ? "1px solid #10b981" : "1px solid var(--border)",
+                                      background: isSelected ? "rgba(16,185,129,0.06)" : "none",
+                                      cursor: "pointer",
+                                      transition: "all 0.15s"
+                                    }}
+                                  >
+                                    <span style={{ fontSize: 11, color: "var(--text)", fontWeight: isSelected ? 600 : 400 }}>
+                                      {fileObj.name}
+                                    </span>
+                                    <span style={{ fontSize: 10, color: isSelected ? "#10b981" : "var(--text-muted)" }}>
+                                      {isSelected ? "✓ 已选定为克隆声源" : "点击提取"}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          );
+        })()}
 
         {/* Main input */}
         <div
@@ -1145,6 +1730,86 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
               </svg>
             </button>
+            {isTts && (() => {
+              const modelIdStr = model?.modelId || "";
+              const isVoiceClone = isVoiceCloneModel(model?.provider, modelIdStr);
+              return (
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  {isVoiceClone && (
+                    <button
+                      onClick={isRecording ? stopRecording : startRecording}
+                      disabled={isStreaming}
+                      title={isRecording ? "停止录音" : "麦克风录音 (可作为声音克隆音源)"}
+                      style={{
+                        flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                        width: 32, height: 32, padding: 0,
+                        background: isRecording ? "rgba(239,68,68,0.15)" : "none", border: "none",
+                        borderRadius: 9,
+                        color: isRecording ? "#ef4444" : "var(--text-muted)",
+                        cursor: isStreaming ? "not-allowed" : "pointer",
+                        opacity: isStreaming ? 0.5 : 1,
+                        transition: "background 0.12s, color 0.12s",
+                      }}
+                      onMouseEnter={(e) => {
+                        if (isStreaming) return;
+                        e.currentTarget.style.background = isRecording ? "rgba(239,68,68,0.2)" : "var(--bg-hover)";
+                        e.currentTarget.style.color = isRecording ? "#ef4444" : "var(--text)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = isRecording ? "rgba(239,68,68,0.15)" : "none";
+                        e.currentTarget.style.color = isRecording ? "#ef4444" : "var(--text-muted)";
+                      }}
+                    >
+                      {isRecording ? (
+                        <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", width: 14, height: 14 }}>
+                          <style>{`
+                            @keyframes micPulse {
+                              0% { transform: scale(0.9); opacity: 0.5; }
+                              50% { transform: scale(1.3); opacity: 1; }
+                              100% { transform: scale(0.9); opacity: 0.5; }
+                            }
+                          `}</style>
+                          <span style={{ position: "absolute", width: 14, height: 14, borderRadius: "50%", background: "#ef4444", animation: "micPulse 1.2s infinite" }} />
+                          <span style={{ position: "absolute", width: 6, height: 6, borderRadius: "50%", background: "#fff" }} />
+                        </div>
+                      ) : (
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                          <line x1="12" y1="19" x2="12" y2="22" />
+                        </svg>
+                      )}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setVoiceConsoleOpen(v => !v)}
+                    title="语音工坊设定"
+                    style={{
+                      flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                      width: 32, height: 32, padding: 0,
+                      background: voiceConsoleOpen ? "rgba(var(--accent-rgb), 0.12)" : "none", border: "none",
+                      borderRadius: 9,
+                      color: voiceConsoleOpen ? "var(--accent)" : "var(--text-muted)",
+                      cursor: "pointer",
+                      transition: "background 0.12s, color 0.12s",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = "var(--bg-hover)";
+                      e.currentTarget.style.color = "var(--text)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = voiceConsoleOpen ? "rgba(var(--accent-rgb), 0.12)" : "none";
+                      e.currentTarget.style.color = voiceConsoleOpen ? "var(--accent)" : "var(--text-muted)";
+                    }}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="3" />
+                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                    </svg>
+                  </button>
+                </div>
+              );
+            })()}
             {/* Model selector — visible always, disabled during streaming */}
             {modelOptions.length > 0 && currentName && onModelChange && (
                 <div ref={dropdownRef} style={{ position: "relative" }}>
