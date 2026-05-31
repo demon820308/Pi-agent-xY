@@ -1,7 +1,13 @@
 {
   "name": "@zwbigi/pi-agent-xy",
   "version": "0.6.25",
+  "author": "demon820308",
   "description": "Pi Agent xY - Web UI for the pi coding agent",
+  "main": "electron/main.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/demon820308/Pi-agent-xY.git"
+  },
   "bin": {
     "pi-agent-xy": "bin/pi-web.js"
   },
@@ -20,7 +26,9 @@
     "build": "next build --webpack",
     "start": "next start -p 30142",
     "lint": "eslint .",
-    "release": "npm version patch --no-git-tag-version && npm run build && npm publish --registry https://registry.npmjs.org --access public"
+    "release": "npm version patch --no-git-tag-version && npm run build && npm publish --registry https://registry.npmjs.org --access public",
+    "electron:dev": "concurrently \"next dev -p 3030 --webpack\" \"wait-on http://localhost:3030 && electron .\"",
+    "electron:build": "npm run build && electron-builder"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^0.75.5",
@@ -42,11 +50,64 @@
     "@types/node": "^25",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^10.0.0",
+    "electron": "^42.3.0",
+    "electron-builder": "^26.8.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
     "postcss": "^8",
     "pptxgenjs": "^3.12.0",
     "tailwindcss": "^4.2.2",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "wait-on": "^9.0.10"
+  },
+  "build": {
+    "appId": "com.pi.agent.xy",
+    "productName": "Pi Agent xY Desktop",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "public/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "public/icon.png",
+      "identity": null
+    },
+    "dmg": {
+      "iconSize": 100,
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "files": [
+      "electron/**/*",
+      "package.json",
+      "node_modules/**/*",
+      ".next/**/*",
+      "!.next/cache/**/*",
+      "bin/**/*",
+      "public/**/*"
+    ]
   }
 }
