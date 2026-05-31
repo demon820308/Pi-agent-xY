@@ -378,6 +378,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     prevTimestamp={idx > 0 ? (messages[idx - 1] as import("@/lib/types").AgentMessage & { timestamp?: number }).timestamp : undefined}
                     activeModel={displayModelValue}
                     prevUserContent={prevUserContent}
+                    cwd={session?.cwd || newSessionCwd}
                   />
                 );
                 if (!isVisible) return view;
@@ -408,6 +409,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                   modelNames={modelNames} 
                   activeModel={displayModelValue} 
                   prevUserContent={streamingPrevUserContent}
+                  cwd={session?.cwd || newSessionCwd}
                 />
               );
             })()}
