@@ -27,6 +27,8 @@ export function TtsPanel({
   const [voiceCloneActiveFile, setVoiceCloneActiveFile] = useState<string | null>(null);
   const [voiceCloneAudioData, setVoiceCloneAudioData] = useState<string | null>(null);
   const [voiceDesignLibrary, setVoiceDesignLibrary] = useState<{ name: string; prompt: string; chips: string[] }[]>([]);
+  const [isSavingTimbre, setIsSavingTimbre] = useState(false);
+  const [newTimbreName, setNewTimbreName] = useState("");
 
   // Load voice settings on mount
   useEffect(() => {
@@ -105,14 +107,7 @@ export function TtsPanel({
     return `A beautiful ${translated.join(", ")}.`;
   };
 
-  const saveCurrentTimbre = () => {
-    const name = prompt("请输入此音色的专属名称（例如：我的冷酷大叔音）：");
-    if (name && name.trim()) {
-      const newLib = [...voiceDesignLibrary, { name: name.trim(), prompt: voiceDesignPrompt, chips: voiceDesignActiveChips }];
-      setVoiceDesignLibrary(newLib);
-      localStorage.setItem("mimo_voice_design_library", JSON.stringify(newLib));
-    }
-  };
+  // Removed old prompt-based saveCurrentTimbre in favor of direct inline workspace saving
 
   const deleteSavedTimbre = (name: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -279,16 +274,86 @@ export function TtsPanel({
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {/* Template Library */}
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
                   <span>👑 我的声线库：</span>
-                  <button 
-                    type="button"
-                    onClick={saveCurrentTimbre} 
-                    disabled={!voiceDesignPrompt}
-                    style={{ background: "none", border: "none", color: "var(--accent)", fontSize: 11, cursor: "pointer", fontWeight: 600 }}
-                  >
-                    ＋ 保存当前声线组合
-                  </button>
+                  {isSavingTimbre ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <input
+                        type="text"
+                        value={newTimbreName}
+                        onChange={(e) => setNewTimbreName(e.target.value)}
+                        placeholder="输入音色名称..."
+                        autoFocus
+                        style={{
+                          padding: "2px 6px",
+                          fontSize: 10.5,
+                          borderRadius: 4,
+                          border: "1px solid var(--accent)",
+                          background: "var(--bg)",
+                          color: "var(--text)",
+                          outline: "none",
+                          width: 120
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (newTimbreName.trim()) {
+                            const newLib = [...voiceDesignLibrary, { name: newTimbreName.trim(), prompt: voiceDesignPrompt, chips: voiceDesignActiveChips }];
+                            setVoiceDesignLibrary(newLib);
+                            localStorage.setItem("mimo_voice_design_library", JSON.stringify(newLib));
+                            setNewTimbreName("");
+                            setIsSavingTimbre(false);
+                          }
+                        }}
+                        style={{
+                          background: "var(--accent)",
+                          border: "none",
+                          color: "#fff",
+                          fontSize: 10,
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                          cursor: "pointer"
+                        }}
+                      >
+                        确认
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewTimbreName("");
+                          setIsSavingTimbre(false);
+                        }}
+                        style={{
+                          background: "none",
+                          border: "1px solid var(--border)",
+                          color: "var(--text-dim)",
+                          fontSize: 10,
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                          cursor: "pointer"
+                        }}
+                      >
+                        取消
+                      </button>
+                    </div>
+                  ) : (
+                    <button 
+                      type="button"
+                      onClick={() => setIsSavingTimbre(true)} 
+                      disabled={!voiceDesignPrompt}
+                      style={{ 
+                        background: "none", 
+                        border: "none", 
+                        color: voiceDesignPrompt ? "var(--accent)" : "var(--text-dim)", 
+                        fontSize: 11, 
+                        cursor: voiceDesignPrompt ? "pointer" : "not-allowed", 
+                        fontWeight: 600 
+                      }}
+                    >
+                      ＋ 保存当前声线组合
+                    </button>
+                  )}
                 </span>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   {voiceDesignLibrary.map((item, idx) => {
@@ -366,7 +431,9 @@ export function TtsPanel({
                               if (isSelected) {
                                 nextChips = voiceDesignActiveChips.filter(c => c !== chip);
                               } else {
-                                nextChips = [...voiceDesignActiveChips, chip];
+                                const otherCategoryChips = cat.chips.filter(c => c !== chip);
+                                nextChips = voiceDesignActiveChips.filter(c => !otherCategoryChips.includes(c));
+                                nextChips.push(chip);
                               }
                               setVoiceDesignActiveChips(nextChips);
                               setVoiceDesignPrompt(compilePromptFromChips(nextChips));
