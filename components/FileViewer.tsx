@@ -303,18 +303,23 @@ function ImageViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
     const es = new EventSource(`/api/files/${encoded}?type=watch`);
     esRef.current = es;
 
-    es.addEventListener("connected", () => setWatching(true));
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     es.addEventListener("change", (e) => {
       try {
         const d = JSON.parse((e as MessageEvent).data) as { size?: number };
         if (typeof d.size === "number") setSize(d.size);
       } catch { /* ignore */ }
-      setBust((b) => b + 1);
+      
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        setBust((b) => b + 1);
+      }, 1000); // 1.0s debounce for images
     });
     es.addEventListener("error", () => setWatching(false));
     es.onerror = () => setWatching(false);
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       es.close();
       esRef.current = null;
     };
@@ -437,7 +442,7 @@ function AudioViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
     const es = new EventSource(`/api/files/${encoded}?type=watch`);
     esRef.current = es;
 
-    es.addEventListener("connected", () => setWatching(true));
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     es.addEventListener("change", (e) => {
       try {
         const d = JSON.parse((e as MessageEvent).data) as { size?: number };
@@ -445,12 +450,17 @@ function AudioViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
       } catch { /* ignore */ }
       setDuration(null);
       setError(null);
-      setBust((b) => b + 1);
+      
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        setBust((b) => b + 1);
+      }, 1000); // 1.0s debounce for audio
     });
     es.addEventListener("error", () => setWatching(false));
     es.onerror = () => setWatching(false);
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       es.close();
       esRef.current = null;
     };
@@ -1106,18 +1116,23 @@ function PptxViewer({ filePath, cwd }: Props) {
     const es = new EventSource(`/api/files/${encoded}?type=watch`);
     esRef.current = es;
 
-    es.addEventListener("connected", () => setWatching(true));
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     es.addEventListener("change", (e) => {
       try {
         const d = JSON.parse((e as MessageEvent).data) as { size?: number };
         if (typeof d.size === "number") setSize(d.size);
       } catch { /* ignore */ }
-      setBust((b) => b + 1);
+      
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        setBust((b) => b + 1);
+      }, 1500); // 1.5s debounce for PPTX presentations
     });
     es.addEventListener("error", () => setWatching(false));
     es.onerror = () => setWatching(false);
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       es.close();
       esRef.current = null;
     };
@@ -1280,8 +1295,12 @@ function TextFileViewer({ filePath, cwd }: Props) {
       setWatching(true);
     });
 
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     es.addEventListener("change", () => {
-      fetchContent(filePath, true);
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        fetchContent(filePath, true);
+      }, 800); // 800ms debounce for text files
     });
 
     es.addEventListener("error", () => {
@@ -1293,6 +1312,7 @@ function TextFileViewer({ filePath, cwd }: Props) {
     };
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       es.close();
       esRef.current = null;
     };
