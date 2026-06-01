@@ -127,16 +127,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     modelsRefreshKey, onBranchDataChange, onSystemPromptChange, activeGemId,
   });
 
-  const [visibleCount, setVisibleCount] = useState(15);
-
-  useEffect(() => {
-    setVisibleCount(15);
-    const timer = setTimeout(() => {
-      setVisibleCount(messages.length);
-    }, 100);
-    return () => clearTimeout(timer);
-  }, [session?.id, messages.length]);
-
   const { soundEnabled, onSoundToggle, playDoneSound } = useAudio();
   const playDoneSoundRef = useRef(playDoneSound);
   playDoneSoundRef.current = playDoneSound;
@@ -346,11 +336,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 if (messages[i].role === "user") { lastUserIdx = i; break; }
               }
               let refIdx = 0;
-              const startIndex = Math.max(0, messages.length - visibleCount);
               return messages.map((msg, idx) => {
-                if (idx < startIndex) {
-                  return null;
-                }
                 const prevAssistantEntryId =
                   msg.role === "user" && idx > 0 && messages[idx - 1].role === "assistant"
                     ? entryIds[idx - 1]
