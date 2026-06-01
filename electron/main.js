@@ -1,39 +1,47 @@
 const { app, BrowserWindow } = require("electron");
+const { fork, execSync } = require("child_process");
 const path = require("path");
 const http = require("http");
 
 let mainWindow;
-let nextServer;
+let nextProcess;
 const PORT = 3030;
+
+function getShellEnv() {
+  if (process.platform === "win32") {
+    return process.env;
+  }
+  try {
+    const shell = process.env.SHELL || "/bin/zsh";
+    const output = execSync(`${shell} -lic 'node -e "console.log(JSON.stringify(process.env))"'`, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 3000
+    });
+    return { ...process.env, ...JSON.parse(output) };
+  } catch (e) {
+    console.error("[Shell Env Capture Error]:", e);
+    return process.env;
+  }
+}
 
 function startNextServer() {
   if (app.isPackaged) {
     try {
-      // Run Next.js programmatically in production inside the main process.
-      // This completely avoids child_process.spawn issues and the need for a separate Node binary.
-      const next = require("next");
-      const nextApp = next({
-        dev: false,
-        dir: path.join(__dirname, "..")
+      const serverPath = path.join(__dirname, "server-worker.js");
+      const env = getShellEnv();
+      
+      // Fork Next.js server as a separate child process (Electron Helper)
+      nextProcess = fork(serverPath, [], {
+        env: { ...env, PORT, NODE_ENV: "production" },
+        stdio: "inherit"
       });
-      const handle = nextApp.getRequestHandler();
-
-      nextApp.prepare().then(() => {
-        nextServer = http.createServer((req, res) => {
-          handle(req, res);
-        });
-        nextServer.listen(PORT, (err) => {
-          if (err) {
-            console.error("[Next.js Server Error]:", err);
-            return;
-          }
-          console.log(`[Next.js Server] listening on http://localhost:${PORT}`);
-        });
-      }).catch((err) => {
-        console.error("[Next.js Prepare Error]:", err);
+      
+      nextProcess.on("exit", (code) => {
+        console.log(`[Next.js Server Worker] exited with code ${code}`);
       });
     } catch (e) {
-      console.error("[Next.js Module Load Error]:", e);
+      console.error("[Next.js Spawn Error]:", e);
     }
   }
 }
@@ -108,7 +116,7 @@ app.on("window-all-closed", () => {
 
 // Clean up background Next.js server before quit
 app.on("will-quit", () => {
-  if (nextServer) {
-    nextServer.close();
+  if (nextProcess) {
+    nextProcess.kill();
   }
 });
