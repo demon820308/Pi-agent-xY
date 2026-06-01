@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
 import { FileViewer } from "./FileViewer";
@@ -14,7 +14,7 @@ import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 
 export function AppShell() {
-  const router = useRouter();
+
   const searchParams = useSearchParams();
   const { isDark, toggleTheme } = useTheme();
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
@@ -120,8 +120,8 @@ export function AppShell() {
     setBranchActiveLeafId(null);
     setSystemPrompt(null);
     setActiveTopPanel(null);
-    router.replace("/", { scroll: false });
-  }, [router]);
+    window.history.replaceState(null, "", "/");
+  }, []);
 
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
     setNewSessionCwd(null);
@@ -136,12 +136,12 @@ export function AppShell() {
       suppressCwdBumpRef.current = true;
       setTimeout(() => { suppressCwdBumpRef.current = false; }, 0);
     }
-    // Skip router.replace when restoring from URL — the param is already correct
-    // and calling replace in production Next.js triggers a Suspense remount loop
+    // Use history.replaceState instead of router.replace to avoid
+    // production Next.js RSC re-rendering which causes multi-second lag
     if (!isRestore) {
-      router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
+      window.history.replaceState(null, "", `?session=${encodeURIComponent(session.id)}`);
     }
-  }, [router]);
+  }, []);
 
   const handleNewSession = useCallback((_sessionId: string, cwd: string, gemId?: string | null) => {
     setSelectedSession(null);
@@ -152,8 +152,8 @@ export function AppShell() {
     setBranchActiveLeafId(null);
     setSystemPrompt(null);
     setActiveTopPanel(null);
-    router.replace("/", { scroll: false });
-  }, [router]);
+    window.history.replaceState(null, "", "/");
+  }, []);
 
   // Called by ChatWindow when a new session gets its real id from pi
   const handleSessionCreated = useCallback((session: SessionInfo) => {
@@ -161,8 +161,8 @@ export function AppShell() {
     setSelectedSession(session);
     setActiveGemId(null);
     setRefreshKey((k) => k + 1);
-    router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
-  }, [router]);
+    window.history.replaceState(null, "", `?session=${encodeURIComponent(session.id)}`);
+  }, []);
 
   const handleAgentEnd = useCallback(() => {
     setRefreshKey((k) => k + 1);
@@ -177,8 +177,8 @@ export function AppShell() {
       ...(prev ?? { path: "", cwd: "", created: "", modified: "", messageCount: 0, firstMessage: "" }),
       id: newSessionId,
     }));
-    router.replace(`?session=${encodeURIComponent(newSessionId)}`, { scroll: false });
-  }, [router]);
+    window.history.replaceState(null, "", `?session=${encodeURIComponent(newSessionId)}`);
+  }, []);
 
   const handleInitialRestoreDone = useCallback(() => {
     setInitialSessionRestored(true);
@@ -195,9 +195,9 @@ export function AppShell() {
       setBranchActiveLeafId(null);
       setSystemPrompt(null);
       setActiveTopPanel(null);
-      router.replace("/", { scroll: false });
+      window.history.replaceState(null, "", "/");
     }
-  }, [selectedSession, router]);
+  }, [selectedSession]);
 
   const handleOpenFile = useCallback((filePath: string, fileName: string) => {
     const tabId = `file:${filePath}`;
