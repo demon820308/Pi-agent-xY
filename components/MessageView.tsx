@@ -776,7 +776,7 @@ function AssistantMessageView({
 
   const effectiveText = cleanSpeechText(textContent || prevUserContent || "");
 
-  const { isPlaying, isLoading, error: ttsError, play, pause, audioUrl } = useTts(entryId || String(message.timestamp), effectiveText, mid);
+  const { isPlaying, isLoading, error: ttsError, play, pause, audioUrl } = useTts(entryId || String(message.timestamp), effectiveText, mid, hovered);
 
   const isFallback = !textContent && showTts && prevUserContent;
 

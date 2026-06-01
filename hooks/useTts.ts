@@ -106,7 +106,7 @@ async function saveCachedAudio(params: VoiceParams, audioUrl: string): Promise<v
   }
 }
 
-export function useTts(messageId: string, textContent: string, modelId?: string) {
+export function useTts(messageId: string, textContent: string, modelId?: string, active = false) {
   const [state, setState] = useState<TtsState>({
     isPlaying: false,
     isLoading: false,
@@ -126,6 +126,8 @@ export function useTts(messageId: string, textContent: string, modelId?: string)
 
   // Pre-load from cache and sync on voice settings change
   useEffect(() => {
+    if (!active) return;
+
     const checkCache = async () => {
       const params = getVoiceParams(textContent, modelId, messageId);
       const cached = await getCachedAudio(params);
@@ -140,7 +142,7 @@ export function useTts(messageId: string, textContent: string, modelId?: string)
       window.removeEventListener("mimo_voice_settings_changed", checkCache);
       window.removeEventListener("mimo_history_voice_settings_changed", checkCache);
     };
-  }, [textContent, modelId, messageId]);
+  }, [textContent, modelId, messageId, active]);
 
   const stopGlobal = () => {
     if (globalActiveAudio) {
