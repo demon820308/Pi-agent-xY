@@ -37,11 +37,22 @@
 
 ### 📦 桌面端 (Standalone App)
 
-#### Windows 安装包下载
-直接前往 [GitHub Releases](https://github.com/demon820308/Pi-agent-xY/releases) 下载最新生成的 `Pi Agent xY Desktop Setup 0.6.24.exe` 一键安装。
+#### ⚙️ 1. 前置依赖准备（重要）
+为了能完整使用软件的所有高级功能（例如 **Add Skill / 安装外部技能插件**），您的系统需要安装并配置好 **Git**：
+* **常见问题**：如果在添加 Skill 时遇到红色报错 `spawn git ENOENT`，说明您的电脑尚未安装 Git，或者 Git 路径未正确配置到系统的环境变量中。
+* **配置步骤**：
+  1. 前往 [Git 官方网站](https://git-scm.com/) 下载适用于 Windows 或 macOS 的最新版安装程序。
+  2. 安装时，建议选择默认设置（特别注意确保勾选 **"Git from the command line and also from 3rd-party software"**，这会自动将 Git 自动添加至系统环境变量 `PATH` 中）。
+  3. 安装完成后，**务必完全退出并重启 Pi Agent xY** 桌面客户端，以便软件重新加载最新的环境变量。
 
-#### macOS 安装包下载与 Gatekeeper 签名警告解决 (重要)
-前往 [GitHub Releases](https://github.com/demon820308/Pi-agent-xY/releases) 下载 `.dmg` 安装包，将其拖拽至 `Applications` 目录中。
+#### 🖥️ 2. Windows 安装与运行
+1. 前往 [GitHub Releases](https://github.com/demon820308/Pi-agent-xY/releases) 下载最新生成的 `Pi Agent xY Desktop Setup 0.6.24.exe` 一键安装包。
+2. 双击运行 `.exe` 文件，跟随向导完成一键安装。
+3. 安装完成后，即可直接通过桌面快捷方式或开始菜单打开客户端。
+
+#### 🍏 3. macOS 安装与运行 (重要)
+1. 前往 [GitHub Releases](https://github.com/demon820308/Pi-agent-xY/releases) 下载 `.dmg` 安装包。
+2. 双击打开并将应用拖拽至 `Applications` (应用程序) 目录中。
 
 > ⚠️ **macOS 提示“文件已损坏”或“身份不明的开发者”解决办法**
 > 由于 standalone 桌面客户端未在 Apple 开发者账号进行官方代码签名，macOS Gatekeeper 安全体系可能会在首次打开应用时拦截，并弹出“软件已损坏，无法打开”或“无法验证开发者”等警告。
