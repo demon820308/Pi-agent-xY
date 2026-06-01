@@ -116,6 +116,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [isCompacting, setIsCompacting] = useState(false);
   const [compactError, setCompactError] = useState<string | null>(null);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>(null);
+  const [lastSessionId, setLastSessionId] = useState<string | null>(null);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
@@ -130,6 +131,27 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const streamingMessageRef = useRef<Partial<AgentMessage> | null>(null);
   const throttleTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const currentSessionId = session?.id ?? null;
+  if (currentSessionId !== lastSessionId) {
+    setLastSessionId(currentSessionId);
+    sessionIdRef.current = currentSessionId;
+    
+    // Sync state reset in render phase to bypass ghost frames
+    setData(null);
+    setMessages([]);
+    setEntryIds([]);
+    setContextUsage(null);
+    setSystemPrompt(null);
+    setAgentRunning(false);
+    setAgentPhase(null);
+    setIsCompacting(false);
+    setForkingEntryId(null);
+    initialScrollDoneRef.current = false;
+    pendingScrollToUserRef.current = false;
+    
+    setLoading(currentSessionId !== null);
+  }
 
   const setNewSessionModel = opts.setNewSessionModel ?? setNewSessionModelState;
   const setToolPresetState = opts.setToolPreset ?? setToolPreset;
@@ -643,62 +665,50 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, []);
 
   const scrollUserMsgToTop = useCallback(() => {
-    const container = scrollContainerRef.current;
-    const el = lastUserMsgRef.current;
-    if (!container || !el) return;
-    const elAbsTop = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
-    container.scrollTo({ top: elAbsTop - 16, behavior: "smooth" });
-  }, []);
-
-  // Load session on session change
-  useEffect(() => {
-    if (session) {
-      sessionIdRef.current = session.id;
-      
-      // Reset state for new session loading to prevent layout leaking
-      setMessages([]);
-      setEntryIds([]);
-      setContextUsage(null);
-      setSystemPrompt(null);
-      setAgentRunning(false);
-      setAgentPhase(null);
-      setIsCompacting(false);
-      setForkingEntryId(null);
-      initialScrollDoneRef.current = false;
-      pendingScrollToUserRef.current = false;
-
-      loadSession(session.id, true, true).then((agentState) => {
-        if (agentState?.running) {
-          loadTools(session.id);
-          if (agentState.state?.isStreaming) {
-            setAgentRunning(true);
-            setAgentPhase({ kind: "waiting_model" });
-            connectEvents(session.id);
-          }
-        } else {
-          if (eventSourceRef.current) {
-            eventSourceRef.current.close();
-            eventSourceRef.current = null;
-          }
-        }
-        if (agentState?.state) {
-          if (agentState.state.isCompacting !== undefined) setIsCompacting(agentState.state.isCompacting);
-          if (agentState.state.contextUsage !== undefined) setContextUsage(agentState.state.contextUsage ?? null);
-          if (agentState.state.systemPrompt !== undefined) setSystemPrompt(agentState.state.systemPrompt ?? null);
-          if (agentState.state.thinkingLevel !== undefined) setThinkingLevel((agentState.state.thinkingLevel as ThinkingLevelOption) ?? "auto");
-        }
-      });
-    }
-    return () => {
-      eventSourceRef.current?.close();
-      eventSourceRef.current = null;
-      if (throttleTimerRef.current) {
-        clearTimeout(throttleTimerRef.current);
-        throttleTimerRef.current = null;
-      }
-      streamingMessageRef.current = null;
-    };
-  }, [session?.id, loadSession, loadTools, connectEvents]);
+     const container = scrollContainerRef.current;
+     const el = lastUserMsgRef.current;
+     if (!container || !el) return;
+     const elAbsTop = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+     container.scrollTo({ top: elAbsTop - 16, behavior: "smooth" });
+   }, []);
+ 
+   // Load session on session change
+   useEffect(() => {
+     if (session) {
+       sessionIdRef.current = session.id;
+       
+       loadSession(session.id, true, true).then((agentState) => {
+         if (agentState?.running) {
+           loadTools(session.id);
+           if (agentState.state?.isStreaming) {
+             setAgentRunning(true);
+             setAgentPhase({ kind: "waiting_model" });
+             connectEvents(session.id);
+           }
+         } else {
+           if (eventSourceRef.current) {
+             eventSourceRef.current.close();
+             eventSourceRef.current = null;
+           }
+         }
+         if (agentState?.state) {
+           if (agentState.state.isCompacting !== undefined) setIsCompacting(agentState.state.isCompacting);
+           if (agentState.state.contextUsage !== undefined) setContextUsage(agentState.state.contextUsage ?? null);
+           if (agentState.state.systemPrompt !== undefined) setSystemPrompt(agentState.state.systemPrompt ?? null);
+           if (agentState.state.thinkingLevel !== undefined) setThinkingLevel((agentState.state.thinkingLevel as ThinkingLevelOption) ?? "auto");
+         }
+       });
+     }
+     return () => {
+       eventSourceRef.current?.close();
+       eventSourceRef.current = null;
+       if (throttleTimerRef.current) {
+         clearTimeout(throttleTimerRef.current);
+         throttleTimerRef.current = null;
+       }
+       streamingMessageRef.current = null;
+     };
+   }, [session?.id, loadSession, loadTools, connectEvents]);
 
   useEffect(() => {
     onSystemPromptChange?.(systemPrompt);
