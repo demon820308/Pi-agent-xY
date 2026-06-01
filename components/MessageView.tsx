@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -310,7 +310,7 @@ function AttachmentChips({ attachments, cwd }: { attachments: ParsedAttachment[]
   );
 }
 
-export function MessageView({ message, isStreaming, toolResults, modelNames, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, activeModel, prevUserContent, cwd }: Props) {
+export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, activeModel, prevUserContent, cwd }: Props) {
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
 
   const lightbox = zoomedImage && (
@@ -403,7 +403,7 @@ export function MessageView({ message, isStreaming, toolResults, modelNames, ent
     return null;
   }
   return null;
-}
+});
 
 function UserMessageView({ message, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, onZoomImage, cwd }: {
   message: UserMessage;
@@ -1220,7 +1220,7 @@ function AssistantMessageView({
 
 function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCallDurations, onZoomImage }: { block: AssistantContentBlock; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number>; onZoomImage?: (src: string) => void }) {
   if (block.type === "text") {
-    return <TextBlock block={block as TextContent} onZoomImage={onZoomImage} />;
+    return <TextBlock block={block as TextContent} onZoomImage={onZoomImage} isStreaming={isStreaming} />;
   }
   if (block.type === "thinking") {
     return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} />;
@@ -1234,7 +1234,7 @@ function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCal
   return null;
 }
 
-function TextBlock({ block, onZoomImage }: { block: TextContent; onZoomImage?: (src: string) => void }) {
+function TextBlock({ block, onZoomImage, isStreaming }: { block: TextContent; onZoomImage?: (src: string) => void; isStreaming?: boolean }) {
   return (
     <div className="markdown-body">
       <ReactMarkdown
@@ -1258,7 +1258,7 @@ function TextBlock({ block, onZoomImage }: { block: TextContent; onZoomImage?: (
             const raw = String(children);
             const isBlock = className?.includes("language-") || raw.includes("\n");
             if (isBlock) {
-              return <CodeBlock code={raw.replace(/\n$/, "")} lang={lang} />;
+              return <CodeBlock code={raw.replace(/\n$/, "")} lang={lang} isStreaming={isStreaming} />;
             }
             return (
               <code
@@ -1493,7 +1493,7 @@ function formatUsage(usage: {
 
 
 
-function CodeBlock({ code, lang }: { code: string; lang: string }) {
+function CodeBlock({ code, lang, isStreaming }: { code: string; lang: string; isStreaming?: boolean }) {
   const { isDark } = useTheme();
   const [copied, setCopied] = useState(false);
 
@@ -1503,6 +1503,64 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
       setTimeout(() => setCopied(false), 1500);
     });
   };
+
+  if (isStreaming) {
+    return (
+      <div
+        style={{
+          position: "relative",
+          marginTop: 4,
+          marginBottom: 4,
+          borderRadius: 6,
+          overflow: "hidden",
+          border: "1px solid var(--border)",
+        }}
+      >
+        <div
+          style={{
+            padding: "3px 10px",
+            background: "var(--bg-panel)",
+            borderBottom: "1px solid var(--border)",
+            fontSize: 11,
+            color: "var(--text-dim)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <span>{lang}</span>
+          <button
+            onClick={copy}
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              fontSize: 11,
+            }}
+          >
+            {copied ? "copied" : "copy"}
+          </button>
+        </div>
+        <pre
+          style={{
+            margin: 0,
+            padding: "10px 12px",
+            fontSize: 12.5,
+            lineHeight: 1.6,
+            borderRadius: 0,
+            background: "var(--bg)",
+            fontFamily: "var(--font-mono)",
+            color: "var(--text)",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-all",
+          }}
+        >
+          {code}
+        </pre>
+      </div>
+    );
+  }
 
   return (
     <div

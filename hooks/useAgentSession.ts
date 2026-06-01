@@ -128,6 +128,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
+  const streamingMessageRef = useRef<Partial<AgentMessage> | null>(null);
+  const throttleTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   const setNewSessionModel = opts.setNewSessionModel ?? setNewSessionModelState;
   const setToolPresetState = opts.setToolPreset ?? setToolPreset;
 
@@ -261,6 +264,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         dispatch({ type: "start" });
         break;
       case "agent_end":
+        if (throttleTimerRef.current) {
+          clearTimeout(throttleTimerRef.current);
+          throttleTimerRef.current = null;
+        }
+        streamingMessageRef.current = null;
         setAgentRunning(false);
         sendingRef.current = false;
         setAgentPhase(null);
@@ -282,12 +290,26 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       case "message_update": {
         const msg = event.message as Partial<AgentMessage> | undefined;
         if (msg) {
-          dispatch({ type: "update", message: normalizeToolCalls(msg as AgentMessage) });
+          const normalized = normalizeToolCalls(msg as AgentMessage);
+          streamingMessageRef.current = normalized;
+          if (!throttleTimerRef.current) {
+            throttleTimerRef.current = setTimeout(() => {
+              if (streamingMessageRef.current) {
+                dispatch({ type: "update", message: streamingMessageRef.current });
+              }
+              throttleTimerRef.current = null;
+            }, 80);
+          }
         }
         setAgentPhase(null);
         break;
       }
       case "message_end": {
+        if (throttleTimerRef.current) {
+          clearTimeout(throttleTimerRef.current);
+          throttleTimerRef.current = null;
+        }
+        streamingMessageRef.current = null;
         const completed = event.message as AgentMessage | undefined;
         if (completed && completed.role !== "user") {
           setMessages((prev) => [...prev, normalizeToolCalls(completed)]);
@@ -670,6 +692,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     return () => {
       eventSourceRef.current?.close();
       eventSourceRef.current = null;
+      if (throttleTimerRef.current) {
+        clearTimeout(throttleTimerRef.current);
+        throttleTimerRef.current = null;
+      }
+      streamingMessageRef.current = null;
     };
   }, [session?.id, loadSession, loadTools, connectEvents]);
 
