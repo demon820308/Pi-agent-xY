@@ -31,8 +31,11 @@ export async function GET(
     const header = sm.getHeader();
     let modified = header?.timestamp ?? new Date().toISOString();
     try { modified = statSync(filePath).mtime.toISOString(); } catch { /* use header timestamp */ }
-    const allSessions = await listAllSessions();
-    const parentSessionId = allSessions.find((s) => s.id === id)?.parentSessionId;
+    let parentSessionId: string | undefined;
+    if (header && header.parentSession) {
+      const match = header.parentSession.match(/_([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$/);
+      if (match) parentSessionId = match[1];
+    }
     const info = header ? {
       path: filePath,
       id: header.id,

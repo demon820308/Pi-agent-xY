@@ -628,10 +628,23 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     container.scrollTo({ top: elAbsTop - 16, behavior: "smooth" });
   }, []);
 
-  // Load session on mount
+  // Load session on session change
   useEffect(() => {
     if (session) {
       sessionIdRef.current = session.id;
+      
+      // Reset state for new session loading to prevent layout leaking
+      setMessages([]);
+      setEntryIds([]);
+      setContextUsage(null);
+      setSystemPrompt(null);
+      setAgentRunning(false);
+      setAgentPhase(null);
+      setIsCompacting(false);
+      setForkingEntryId(null);
+      initialScrollDoneRef.current = false;
+      pendingScrollToUserRef.current = false;
+
       loadSession(session.id, true, true).then((agentState) => {
         if (agentState?.running) {
           loadTools(session.id);
@@ -639,6 +652,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             setAgentRunning(true);
             setAgentPhase({ kind: "waiting_model" });
             connectEvents(session.id);
+          }
+        } else {
+          if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+            eventSourceRef.current = null;
           }
         }
         if (agentState?.state) {
@@ -653,8 +671,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       eventSourceRef.current?.close();
       eventSourceRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [session?.id, loadSession, loadTools, connectEvents]);
 
   useEffect(() => {
     onSystemPromptChange?.(systemPrompt);
