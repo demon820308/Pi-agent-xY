@@ -18,6 +18,7 @@ interface Props {
   explorerRefreshKey?: number;
   onAtMention?: (relativePath: string) => void;
   activeGemId?: string | null;
+  modelsRefreshKey?: number;
 }
 
 function formatRelativeTime(dateStr: string): string {
@@ -205,7 +206,7 @@ function PiAgentTitle() {
 import GemEditorModal from "./GemEditorModal";
 import type { GemProfile } from "@/lib/types";
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, activeGemId }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, activeGemId, modelsRefreshKey }: Props) {
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -222,6 +223,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // Gem-xY custom agent states
   const [gems, setGems] = useState<GemProfile[]>([]);
   const [modelList, setModelList] = useState<{ id: string; name: string; provider: string }[]>([]);
+  const [defaultModel, setDefaultModel] = useState<{ provider: string; modelId: string } | null>(null);
   const [isGemModalOpen, setIsGemModalOpen] = useState(false);
   const [editingGemId, setEditingGemId] = useState<string | null>(null);
   const [gemsExpanded, setGemsExpanded] = useState(true);
@@ -246,11 +248,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   useEffect(() => {
     fetch("/api/models")
       .then((r) => r.json())
-      .then((d: { modelList?: { id: string; name: string; provider: string }[] }) => {
+      .then((d: { modelList?: { id: string; name: string; provider: string }[]; defaultModel?: { provider: string; modelId: string } | null }) => {
         if (d.modelList) setModelList(d.modelList);
+        if (d.defaultModel) setDefaultModel(d.defaultModel);
       })
       .catch(() => {});
-  }, []);
+  }, [modelsRefreshKey]);
 
   const handleSelectGem = useCallback((gemId: string) => {
     if (!selectedCwd) return;
@@ -1010,6 +1013,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         gemId={editingGemId}
         onSave={() => loadGems()}
         modelList={modelList}
+        defaultModel={defaultModel}
       />
     </div>
   );
