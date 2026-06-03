@@ -9,6 +9,7 @@ interface GemEditorModalProps {
   gemId: string | null;
   onSave: (gem: GemProfile) => void;
   modelList: { id: string; name: string; provider: string }[];
+  defaultModel?: { provider: string; modelId: string } | null;
 }
 
 const ALL_AVAILABLE_TOOLS = [
@@ -23,7 +24,7 @@ const ALL_AVAILABLE_TOOLS = [
 
 const PRESET_AVATARS = ["🤖", "💻", "🔍", "🧠", "✍️", "🎨", "🌐", "⚡", "🔧", "📁", "📊", "🚀"];
 
-export default function GemEditorModal({ isOpen, onClose, gemId, onSave, modelList }: GemEditorModalProps) {
+export default function GemEditorModal({ isOpen, onClose, gemId, onSave, modelList, defaultModel }: GemEditorModalProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [avatar, setAvatar] = useState("🤖");
@@ -78,7 +79,11 @@ export default function GemEditorModal({ isOpen, onClose, gemId, onSave, modelLi
       setSystemPrompt("");
       setAllowedTools(ALL_AVAILABLE_TOOLS.map((t) => t.name)); // Enabled all by default
       setKnowledgeFiles([]);
-      setSelectedModelKey(modelList.length > 0 ? `${modelList[0].provider}/${modelList[0].id}` : "");
+      if (defaultModel) {
+        setSelectedModelKey(`${defaultModel.provider}/${defaultModel.modelId}`);
+      } else {
+        setSelectedModelKey(modelList.length > 0 ? `${modelList[0].provider}/${modelList[0].id}` : "");
+      }
       setError(null);
     }
   }, [isOpen, gemId, modelList]);

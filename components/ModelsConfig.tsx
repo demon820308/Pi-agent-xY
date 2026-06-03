@@ -479,7 +479,19 @@ function setDeepseekCompat(model: ModelEntry, enabled: boolean): ModelEntry {
   return { ...model, compat: Object.keys(rest).length ? rest : undefined };
 }
 
-function ModelDetail({ model, onChange, onDelete }: { model: ModelEntry; onChange: (m: ModelEntry) => void; onDelete: () => void }) {
+function ModelDetail({
+  model,
+  isDefault,
+  onSetDefault,
+  onChange,
+  onDelete,
+}: {
+  model: ModelEntry;
+  isDefault: boolean;
+  onSetDefault: () => void;
+  onChange: (m: ModelEntry) => void;
+  onDelete: () => void;
+}) {
   const set = <K extends keyof ModelEntry>(k: K, v: ModelEntry[K]) => onChange({ ...model, [k]: v });
   const costVal = (k: keyof NonNullable<ModelEntry["cost"]>) => model.cost?.[k] !== undefined ? String(model.cost[k]) : "";
   const setCost = (k: keyof NonNullable<ModelEntry["cost"]>, v: string) => {
@@ -490,7 +502,35 @@ function ModelDetail({ model, onChange, onDelete }: { model: ModelEntry; onChang
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <SectionTitle>Model</SectionTitle>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <SectionTitle>Model</SectionTitle>
+          {model.id && (
+            isDefault ? (
+              <span style={{ fontSize: 10, color: "var(--accent)", fontWeight: 600, background: "rgba(249,115,22,0.1)", padding: "2px 6px", borderRadius: 4 }}>
+                ✨ 全局默认 / Global Default
+              </span>
+            ) : (
+              <button
+                onClick={onSetDefault}
+                style={{
+                  fontSize: 10,
+                  padding: "2px 7px",
+                  background: "var(--bg-panel)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 4,
+                  color: "var(--text-muted)",
+                  cursor: "pointer",
+                  fontWeight: 500,
+                  transition: "border-color 0.12s, color 0.12s",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.color = "var(--accent)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.color = "var(--text-muted)"; }}
+              >
+                设为全局默认 / Set as Global Default
+              </button>
+            )
+          )}
+        </div>
         <button onClick={onDelete}
           style={{ padding: "3px 8px", background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, color: "#ef4444", cursor: "pointer", fontSize: 11 }}>
           Remove
@@ -566,7 +606,19 @@ function ModelDetail({ model, onChange, onDelete }: { model: ModelEntry; onChang
 
 // ── OAuth detail ──────────────────────────────────────────────────────────────
 
-function OAuthDetail({ provider, onRefresh }: { provider: OAuthProvider; onRefresh: () => void }) {
+function OAuthDetail({
+  provider,
+  onRefresh,
+  models = [],
+  defaultModel,
+  onSetDefault,
+}: {
+  provider: OAuthProvider;
+  onRefresh: () => void;
+  models?: { id: string; name: string }[];
+  defaultModel?: { provider: string; modelId: string } | null;
+  onSetDefault?: (provider: string, modelId: string) => void;
+}) {
   const [loginState, setLoginState] = useState<OAuthLoginState>({ phase: "idle" });
   const [inputValue, setInputValue] = useState("");
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -819,13 +871,88 @@ function OAuthDetail({ provider, onRefresh }: { provider: OAuthProvider; onRefre
           </>
         )}
       </div>
+
+      {models.length > 0 && (
+        <div style={{ marginTop: 24, borderTop: "1px solid var(--border)", paddingTop: 16 }}>
+          <SectionTitle>包含模型 / Models ({models.length})</SectionTitle>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8, marginTop: 10 }}>
+            {models.map((m) => {
+              const isDefault = defaultModel?.provider === provider.id && defaultModel?.modelId === m.id;
+              return (
+                <div
+                  key={m.id}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 3,
+                    padding: "8px 10px",
+                    background: "var(--bg-panel)",
+                    border: isDefault ? "1.5px solid var(--accent)" : "1px solid var(--border)",
+                    borderRadius: 6,
+                    position: "relative",
+                  }}
+                >
+                  <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: isDefault ? 40 : 58 }}>
+                    {m.name || m.id}
+                  </span>
+                  <code style={{ fontSize: 9, color: "var(--text-dim)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: isDefault ? 40 : 58 }}>
+                    {m.id}
+                  </code>
+
+                  {isDefault ? (
+                    <span style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", fontSize: 9, color: "var(--accent)", fontWeight: 600, background: "rgba(249,115,22,0.1)", padding: "2px 5px", borderRadius: 4 }}>
+                      ✨ 全局默认
+                    </span>
+                  ) : (
+                    onSetDefault && (
+                      <button
+                        onClick={() => onSetDefault(provider.id, m.id)}
+                        style={{
+                          position: "absolute",
+                          right: 8,
+                          top: "50%",
+                          transform: "translateY(-50%)",
+                          fontSize: 9,
+                          padding: "2px 5px",
+                          background: "var(--bg)",
+                          border: "1px solid var(--border)",
+                          borderRadius: 4,
+                          color: "var(--text-muted)",
+                          cursor: "pointer",
+                          fontWeight: 500,
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.color = "var(--accent)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.color = "var(--text-muted)"; }}
+                      >
+                        设为全局默认
+                      </button>
+                    )
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 // ── API Key detail ────────────────────────────────────────────────────────────
 
-function ApiKeyDetail({ provider, onRefresh }: { provider: ApiKeyProvider; onRefresh: () => void }) {
+function ApiKeyDetail({
+  provider,
+  onRefresh,
+  models = [],
+  defaultModel,
+  onSetDefault,
+}: {
+  provider: ApiKeyProvider;
+  onRefresh: () => void;
+  models?: { id: string; name: string }[];
+  defaultModel?: { provider: string; modelId: string } | null;
+  onSetDefault?: (provider: string, modelId: string) => void;
+}) {
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -949,6 +1076,69 @@ function ApiKeyDetail({ provider, onRefresh }: { provider: ApiKeyProvider; onRef
         >
           {removing ? "Removing…" : "Disconnect"}
         </button>
+      )}
+
+      {models.length > 0 && (
+        <div style={{ marginTop: 24, borderTop: "1px solid var(--border)", paddingTop: 16 }}>
+          <SectionTitle>包含模型 / Models ({models.length})</SectionTitle>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8, marginTop: 10 }}>
+            {models.map((m) => {
+              const isDefault = defaultModel?.provider === provider.id && defaultModel?.modelId === m.id;
+              return (
+                <div
+                  key={m.id}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 3,
+                    padding: "8px 10px",
+                    background: "var(--bg-panel)",
+                    border: isDefault ? "1.5px solid var(--accent)" : "1px solid var(--border)",
+                    borderRadius: 6,
+                    position: "relative",
+                  }}
+                >
+                  <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: isDefault ? 40 : 58 }}>
+                    {m.name || m.id}
+                  </span>
+                  <code style={{ fontSize: 9, color: "var(--text-dim)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: isDefault ? 40 : 58 }}>
+                    {m.id}
+                  </code>
+
+                  {isDefault ? (
+                    <span style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", fontSize: 9, color: "var(--accent)", fontWeight: 600, background: "rgba(249,115,22,0.1)", padding: "2px 5px", borderRadius: 4 }}>
+                      ✨ 全局默认
+                    </span>
+                  ) : (
+                    onSetDefault && (
+                      <button
+                        onClick={() => onSetDefault(provider.id, m.id)}
+                        style={{
+                          position: "absolute",
+                          right: 8,
+                          top: "50%",
+                          transform: "translateY(-50%)",
+                          fontSize: 9,
+                          padding: "2px 5px",
+                          background: "var(--bg)",
+                          border: "1px solid var(--border)",
+                          borderRadius: 4,
+                          color: "var(--text-muted)",
+                          cursor: "pointer",
+                          fontWeight: 500,
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.color = "var(--accent)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.color = "var(--text-muted)"; }}
+                      >
+                        设为全局默认
+                      </button>
+                    )
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1111,6 +1301,8 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [oauthProviders, setOauthProviders] = useState<OAuthProvider[]>([]);
   const [apiKeyProviders, setApiKeyProviders] = useState<ApiKeyProvider[]>([]);
+  const [systemModels, setSystemModels] = useState<{ id: string; name: string; provider: string }[]>([]);
+  const [defaultModel, setDefaultModel] = useState<{ provider: string; modelId: string } | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const loadOAuthProviders = useCallback(() => {
@@ -1140,7 +1332,29 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
       .finally(() => setLoading(false));
     loadOAuthProviders();
     loadApiKeyProviders();
+    fetch("/api/models")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.modelList) setSystemModels(d.modelList);
+        if (d.defaultModel) setDefaultModel(d.defaultModel);
+      })
+      .catch(() => {});
   }, [loadOAuthProviders, loadApiKeyProviders]);
+
+  const handleSetDefaultModel = useCallback(async (provider: string, modelId: string) => {
+    try {
+      const res = await fetch("/api/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, modelId }),
+      });
+      if (res.ok) {
+        setDefaultModel({ provider, modelId });
+      }
+    } catch (e) {
+      console.error("Failed to set default model:", e);
+    }
+  }, []);
 
   const addCustomProvider = useCallback(() => {
     let finalName = "new-provider";
@@ -1245,12 +1459,14 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
     if (selection.type === "oauth") {
       const p = oauthProviders.find((p) => p.id === selection.providerId);
       if (!p) return null;
-      return <OAuthDetail key={p.id} provider={p} onRefresh={loadOAuthProviders} />;
+      const filtered = systemModels.filter((m) => m.provider === p.id);
+      return <OAuthDetail key={p.id} provider={p} onRefresh={loadOAuthProviders} models={filtered} defaultModel={defaultModel} onSetDefault={handleSetDefaultModel} />;
     }
     if (selection.type === "apikey") {
       const p = apiKeyProviders.find((p) => p.id === selection.providerId);
       if (!p) return null;
-      return <ApiKeyDetail key={p.id} provider={p} onRefresh={loadApiKeyProviders} />;
+      const filtered = systemModels.filter((m) => m.provider === p.id);
+      return <ApiKeyDetail key={p.id} provider={p} onRefresh={loadApiKeyProviders} models={filtered} defaultModel={defaultModel} onSetDefault={handleSetDefaultModel} />;
     }
     if (selection.type === "provider") {
       const provider = config.providers?.[selection.name];
@@ -1269,10 +1485,13 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
     const provider = config.providers?.[selection.providerName];
     const model = provider?.models?.[selection.index];
     if (!model) return null;
+    const isDefault = defaultModel?.provider === selection.providerName && defaultModel?.modelId === model.id;
     return (
       <ModelDetail
         key={`${selection.providerName}-${selection.index}`}
         model={model}
+        isDefault={isDefault}
+        onSetDefault={() => handleSetDefaultModel(selection.providerName, model.id)}
         onChange={(m) => updateModel(selection.providerName, selection.index, m)}
         onDelete={() => removeModel(selection.providerName, selection.index)}
       />

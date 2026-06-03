@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { findModel } from "../../../../lib/model-resolver";
 
 export const dynamic = "force-dynamic";
 
@@ -85,7 +86,7 @@ export async function POST(req: Request) {
     let useGoogleApi = false;
 
     // 3. Try to find the model in the registry to get authentic endpoint + headers
-    const model = reqProvider && reqModelId ? registry.find(reqProvider, reqModelId) : undefined;
+    const model = reqProvider && reqModelId ? findModel(registry, reqProvider, reqModelId) : undefined;
 
     if (model) {
       const auth = await registry.getApiKeyAndHeaders(model);

@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createAgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
 import { cacheSessionPath } from "./session-reader";
+import { findModel } from "./model-resolver";
 import type { AgentSessionLike, ToolInfo } from "./pi-types";
 import { isVisionModel } from "./vision";
 
@@ -182,9 +183,9 @@ export class AgentSessionWrapper {
       case "set_model": {
         const { provider, modelId } = command as { provider: string; modelId: string };
         const registry = this.inner.modelRegistry;
-        const model = registry.find(provider, modelId);
+        const model = findModel(registry, provider, modelId);
         if (!model) throw new Error(`Model not found: ${provider}/${modelId}`);
-        console.log("Model debug - found in registry:", JSON.stringify(model, null, 2));
+        console.log("Model debug - resolved model:", JSON.stringify(model, null, 2));
 
         const currentModel = this.inner.model;
         if (currentModel && currentModel.id === model.id && currentModel.provider === model.provider) {
@@ -511,6 +512,28 @@ export async function startRpcSession(
         }
         return stream;
       };
+    }
+
+    // Dynamic recovery: Check if the default model configured in settings fell back due to registry lookup failure.
+    // If so, force-set it using our synthetic model definition.
+    try {
+      const { SettingsManager } = await import("@earendil-works/pi-coding-agent");
+      const settings = SettingsManager.create(cwd, agentDir);
+      const defaultProvider = settings.getDefaultProvider();
+      const defaultModelId = settings.getDefaultModel();
+      if (defaultProvider && defaultModelId) {
+        const currentModel = inner.model;
+        if (currentModel && currentModel.id !== defaultModelId) {
+          const synthetic = findModel(inner.modelRegistry, defaultProvider, defaultModelId);
+          if (synthetic) {
+            console.log(`[rpc-manager] Default model "${defaultModelId}" fell back to "${currentModel.id}" in createAgentSession. Re-applying synthetic model.`);
+            const cleanModel = JSON.parse(JSON.stringify(synthetic));
+            await inner.setModel(cleanModel);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("[rpc-manager] Failed to auto-recover synthetic default model:", e);
     }
 
     const wrapper = new AgentSessionWrapper(inner);
