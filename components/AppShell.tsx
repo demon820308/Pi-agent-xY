@@ -10,6 +10,7 @@ import { ModelsConfig } from "./ModelsConfig";
 import { SkillsConfig } from "./SkillsConfig";
 import { BranchNavigator } from "./BranchNavigator";
 import { useTheme } from "@/hooks/useTheme";
+import { PIPELINE_GEM_DEFAULTS } from "@/lib/pipeline-gem";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 
@@ -30,6 +31,10 @@ export function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
+
+  // Pipeline mode
+  const [pipelineActive, setPipelineActive] = useState(false)
+  const handlePipelineToggleRef = useRef<() => void>(() => {})
 
   // Branch navigator state — populated by ChatWindow via onBranchDataChange
   const [branchTree, setBranchTree] = useState<SessionTreeNode[]>([]);
@@ -127,6 +132,7 @@ export function AppShell() {
     setNewSessionCwd(null);
     setSelectedSession(session);
     setActiveGemId(null);
+    setPipelineActive(false);
     setSessionKey((k) => k + 1);
     setSystemPrompt(null);
     setInitialSessionRestored(true);
@@ -179,6 +185,72 @@ export function AppShell() {
     }));
     window.history.replaceState(null, "", `?session=${encodeURIComponent(newSessionId)}`);
   }, []);
+
+  // Pipeline toggle — must be after handleNewSession since it references it
+  const handlePipelineToggle = useCallback(async () => {
+    // If pipeline is active, just close the panel
+    if (pipelineActive) {
+      setPipelineActive(false)
+      return
+    }
+
+    // Check if current session is already a Pipeline session (has Pipeline Gem)
+    if (selectedSession?.gemId) {
+      try {
+        const gemsRes = await fetch('/api/gem-xy')
+        const gems = await gemsRes.json() as { id: string; name: string }[]
+        const pipelineGemId = gems.find((g) => g.name === PIPELINE_GEM_DEFAULTS.name)?.id
+        if (pipelineGemId && selectedSession.gemId === pipelineGemId) {
+          // Current session is already a Pipeline session, just show the panel
+          console.log('[Pipeline] Current session is already a Pipeline session, showing panel')
+          setPipelineActive(true)
+          return
+        }
+      } catch (e) {
+        console.error('[Pipeline] Failed to check gems:', e)
+      }
+    }
+
+    // Otherwise, create a new Pipeline session
+    try {
+      console.log('[Pipeline] Toggle ON — fetching gems...')
+      const gemsRes = await fetch('/api/gem-xy')
+      const gems = await gemsRes.json() as { id: string; name: string }[]
+      let gemId = gems.find((g) => g.name === PIPELINE_GEM_DEFAULTS.name)?.id
+
+      if (!gemId) {
+        console.log('[Pipeline] Creating Pipeline Gem...')
+        const createRes = await fetch('/api/gem-xy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(PIPELINE_GEM_DEFAULTS),
+        })
+        const created = await createRes.json()
+        gemId = created.id
+        console.log('[Pipeline] Gem created:', gemId)
+      } else {
+        console.log('[Pipeline] Gem exists:', gemId)
+      }
+
+      if (gemId) {
+        const cwd = activeCwd || 'C:\\'
+        console.log('[Pipeline] Creating session with cwd:', cwd, 'gemId:', gemId)
+        handleNewSession(`pipeline-${Date.now()}`, cwd, gemId)
+        setPipelineActive(true)
+        console.log('[Pipeline] pipelineActive set to true')
+      } else {
+        console.error('[Pipeline] No gemId available')
+      }
+    } catch (e) {
+      console.error('[Pipeline] Failed:', e)
+      // Still activate pipeline even if gem creation fails
+      setPipelineActive(true)
+      handleNewSession(`pipeline-${Date.now()}`, activeCwd || '', null)
+    }
+  }, [pipelineActive, activeCwd, handleNewSession, selectedSession])
+
+  // Keep ref in sync for use in effects
+  handlePipelineToggleRef.current = handlePipelineToggle
 
   const handleInitialRestoreDone = useCallback(() => {
     setInitialSessionRestored(true);
@@ -358,6 +430,24 @@ export function AppShell() {
                 <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
               </svg>
             )}
+          </button>
+          {/* Pipeline toggle */}
+          <button
+            onClick={handlePipelineToggle}
+            title={pipelineActive ? 'Close pipeline' : 'Open video script pipeline'}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 36, height: 36, padding: 0,
+              background: pipelineActive ? 'var(--accent)' : 'none',
+              border: 'none', borderRight: '1px solid var(--border)',
+              color: pipelineActive ? '#fff' : 'var(--text-muted)',
+              cursor: 'pointer', flexShrink: 0,
+              transition: 'color 0.12s, background 0.12s', borderRadius: 0,
+            }}
+            onMouseEnter={(e) => { if (!pipelineActive) e.currentTarget.style.color = 'var(--text)' }}
+            onMouseLeave={(e) => { if (!pipelineActive) e.currentTarget.style.color = 'var(--text-muted)' }}
+          >
+            <span style={{ fontSize: 14 }}>🎬</span>
           </button>
           <button
             onClick={(e) => {
@@ -572,6 +662,8 @@ export function AppShell() {
               onSessionStatsChange={handleSessionStatsChange}
               onContextUsageChange={handleContextUsageChange}
               activeGemId={activeGemId}
+              pipelineActive={pipelineActive}
+              onPipelineDeactivate={() => setPipelineActive(false)}
             />
           ) : showPlaceholder ? (
             activeCwd ? (

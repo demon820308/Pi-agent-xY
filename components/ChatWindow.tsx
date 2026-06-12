@@ -5,9 +5,12 @@ import type { AgentMessage, SessionInfo, SessionTreeNode } from "@/lib/types";
 import { MessageView } from "./MessageView";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
-import { useAgentSession, type AgentPhase } from "@/hooks/useAgentSession";
+import { useAgentSession, type AgentPhase, type AgentEvent } from "@/hooks/useAgentSession";
 import { useAudio } from "@/hooks/useAudio";
 import { useDragDrop } from "@/hooks/useDragDrop";
+import { usePipeline } from "@/hooks/usePipeline";
+import { PipelinePanel } from "./PipelinePanel";
+import { BilibiliCookieModal } from "./BilibiliCookieModal";
 
 interface Props {
   session: SessionInfo | null;
@@ -22,6 +25,8 @@ interface Props {
   onSessionStatsChange?: (stats: { tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }; cost?: number } | null) => void;
   onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
   activeGemId?: string | null;
+  pipelineActive?: boolean;
+  onPipelineDeactivate?: () => void;
 }
 
 function phaseLabel(phase: AgentPhase): string {
@@ -35,6 +40,25 @@ function phaseLabel(phase: AgentPhase): string {
   if (phase?.kind === "waiting_model") return "Waiting for model...";
   return "Thinking...";
 }
+
+function getMessageTextContent(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((block: unknown) => {
+        if (block && typeof block === "object" && "type" in block && (block as Record<string, unknown>).type === "text") {
+          return ((block as Record<string, unknown>).text as string) || "";
+        }
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  return "";
+}
+
 
 const TYPEWRITER_PHRASES = [
   "ready when you are.",
@@ -91,8 +115,9 @@ function Typewriter({ phrases }: { phrases: string[] }) {
   );
 }
 
-export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onContextUsageChange, activeGemId }: Props) {
+export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onContextUsageChange, activeGemId, pipelineActive, onPipelineDeactivate }: Props) {
   const [gemName, setGemName] = useState<string | null>(null);
+  const [cookieModalOpen, setCookieModalOpen] = useState(false);
 
   useEffect(() => {
     if (activeGemId) {
@@ -110,6 +135,31 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     }
   }, [activeGemId]);
 
+  // Ref for wrapped onAgentEnd (updated after pipeline is created)
+  const wrappedOnAgentEndRef = useRef<() => void>(() => onAgentEnd?.())
+  const pipelineAgentEventRef = useRef<((event: AgentEvent) => void) | null>(null)
+
+  const { soundEnabled, onSoundToggle, playDoneSound } = useAudio();
+
+  const handleAgentEventFromOptions = useCallback((event: AgentEvent) => {
+    if (event.type === "message_end") {
+      const completed = event.message as AgentMessage | undefined;
+      if (completed && completed.role === "assistant") {
+        const text = getMessageTextContent(completed.content);
+        if (text) {
+          const win = window as unknown as Record<string, string | undefined>;
+          win.__pipelineAssistantCache = text;
+          console.log("[ChatWindow] Synchronously cached message_end assistant text:", text.length, "chars");
+        }
+      }
+    }
+    if (event.type === "agent_end" && soundEnabled) {
+      playDoneSound();
+    }
+    // Forward event to pipeline for event-driven rewrite result
+    pipelineAgentEventRef.current?.(event);
+  }, [soundEnabled, playDoneSound]);
+
   const {
     loading, error, messages, entryIds, streamState,
     agentRunning, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, toolPreset, thinkingLevel,
@@ -121,28 +171,88 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     lastUserMsgRef,
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handleAbortCompaction,
-    handleToolPresetChange, handleThinkingLevelChange, handleAgentEventRef,
+    handleToolPresetChange, handleThinkingLevelChange,
+    loadSession,
   } = useAgentSession({
-    session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked,
+    session, newSessionCwd, onAgentEnd: wrappedOnAgentEndRef.current, onSessionCreated, onSessionForked,
     modelsRefreshKey, onBranchDataChange, onSystemPromptChange, activeGemId,
+    onAgentEvent: handleAgentEventFromOptions,
   });
 
-  const { soundEnabled, onSoundToggle, playDoneSound } = useAudio();
-  const playDoneSoundRef = useRef(playDoneSound);
-  playDoneSoundRef.current = playDoneSound;
-  const soundEnabledRef = useRef(soundEnabled);
-  soundEnabledRef.current = soundEnabled;
-
-  // Wrap agent event handler to play sound on agent_end
-  const origHandler = handleAgentEventRef.current;
+  // Pipeline mode (controlled by AppShell)
   useEffect(() => {
-    handleAgentEventRef.current = (event) => {
-      if (event.type === "agent_end" && soundEnabledRef.current) {
-        playDoneSoundRef.current();
+    if (pipelineActive) console.log('[ChatWindow] pipelineActive=true, showing PipelinePanel')
+  }, [pipelineActive])
+  // Keep messages ref in sync so getLastAssistantText always reads latest
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
+
+  // Proactively cache latest assistant text to window on every messages update
+  useEffect(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i]
+      if (m.role === 'assistant') {
+        const text = getMessageTextContent(m.content)
+        if (text) {
+          const win = window as unknown as Record<string, string | undefined>
+          win.__pipelineAssistantCache = text
+          break
+        }
       }
-      origHandler?.(event);
-    };
-  }, [origHandler, handleAgentEventRef]);
+    }
+  }, [messages])
+
+  // Module-level cache for assistant text — survives HMR
+  const getLastAssistantText = useCallback(() => {
+    let lastUserIdx = -1;
+    for (let i = messagesRef.current.length - 1; i >= 0; i--) {
+      if (messagesRef.current[i].role === 'user') {
+        lastUserIdx = i;
+        break;
+      }
+    }
+
+    if (lastUserIdx !== -1) {
+      for (let i = messagesRef.current.length - 1; i > lastUserIdx; i--) {
+        const m = messagesRef.current[i]
+        if (m.role === 'assistant') {
+          const text = getMessageTextContent(m.content)
+          if (text) {
+            // Cache to module-level variable (survives HMR)
+            const win = window as unknown as Record<string, string | undefined>
+            win.__pipelineAssistantCache = text
+          }
+          return text
+        }
+      }
+    }
+    // Fallback: read from cache if messages were wiped by HMR
+    const win = window as unknown as Record<string, string | undefined>
+    return win.__pipelineAssistantCache || ''
+  }, [])
+
+  const pipeline = usePipeline({
+    agentHandleSend: handleSend,
+    agentRunning,
+    getLastAssistantText,
+    sessionId: session?.id,
+    cwd: session?.cwd || newSessionCwd,
+    onTtsComplete: () => {
+      if (session?.id) {
+        loadSession(session.id);
+      }
+    },
+  })
+
+  // Keep pipeline agent event ref in sync
+  pipelineAgentEventRef.current = pipeline.handleAgentEvent
+
+  // Wrap onAgentEnd to also notify parent
+  const wrappedOnAgentEnd = useCallback(() => {
+    onAgentEnd?.()
+  }, [onAgentEnd])
+  wrappedOnAgentEndRef.current = wrappedOnAgentEnd
+
 
   // Push session stats up to AppShell for the top bar.
   // Compare scalar fields to avoid loops from new object identity each render.
@@ -229,13 +339,38 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       soundEnabled={soundEnabled}
       onSoundToggle={onSoundToggle}
       cwd={session?.cwd ?? newSessionCwd ?? null}
+      onOpenCookieConfig={() => setCookieModalOpen(true)}
     />
   );
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center text-text-muted">
-        Loading session...
+      <div className="flex h-full flex-col">
+        {pipelineActive && (
+          <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ maxWidth: 820, margin: '0 auto' }}>
+              <PipelinePanel
+                state={pipeline.state}
+                config={pipeline.config}
+                onConfigChange={pipeline.setConfig}
+                onStart={pipeline.start}
+                onStartWithLink={pipeline.startWithLink}
+                onRewrite={pipeline.startRewrite}
+                onRetry={pipeline.retry}
+                onReset={pipeline.reset}
+                onTriggerTts={pipeline.triggerTts}
+                onClose={() => onPipelineDeactivate?.()}
+                modelList={modelList}
+                currentModelKey={displayModelValue ? `${displayModelValue.provider}/${displayModelValue.modelId}` : undefined}
+                onModelChange={handleModelChange}
+                onOpenCookieConfig={() => setCookieModalOpen(true)}
+              />
+            </div>
+          </div>
+        )}
+        <div className="flex flex-1 items-center justify-center text-text-muted">
+          Loading session...
+        </div>
       </div>
     );
   }
@@ -344,11 +479,13 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 
                 const prevUserContent = msg.role === "assistant" && idx > 0 && messages[idx - 1].role === "user"
                   ? (typeof messages[idx - 1].content === "string"
-                      ? messages[idx - 1].content
-                      : (messages[idx - 1].content as any)
-                          .filter((b: any) => b.type === "text")
-                          .map((b: any) => b.text)
-                          .join("\n"))
+                      ? (messages[idx - 1].content as string)
+                      : Array.isArray(messages[idx - 1].content)
+                          ? (messages[idx - 1].content as unknown[])
+                              .filter((b): b is { type: "text"; text: string } => !!b && typeof b === "object" && "type" in b && b.type === "text")
+                              .map((b) => b.text)
+                              .join("\n")
+                          : "")
                   : undefined;
 
                 const isVisible = msg.role === "user" || msg.role === "assistant";
@@ -366,6 +503,9 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     showTimestamp = false;
                   }
                 }
+                const isLastMessage = idx === messages.length - 1;
+                const isPipelineSynthesizing = isLastMessage && pipeline.state.step === "synthesizing";
+
                 const view = (
                   <MessageView
                     key={idx}
@@ -383,6 +523,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     activeModel={displayModelValue}
                     prevUserContent={prevUserContent}
                     cwd={session?.cwd || newSessionCwd}
+                    isPipelineSynthesizing={isPipelineSynthesizing}
                   />
                 );
                 if (!isVisible) return view;
@@ -400,18 +541,20 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               const lastUserMessage = messages.length > 0 && messages[messages.length - 1].role === "user" ? messages[messages.length - 1] : null;
               const streamingPrevUserContent = lastUserMessage
                 ? (typeof lastUserMessage.content === "string"
-                    ? lastUserMessage.content
-                    : (lastUserMessage.content as any)
-                        .filter((b: any) => b.type === "text")
-                        .map((b: any) => b.text)
-                        .join("\n"))
+                    ? (lastUserMessage.content as string)
+                    : Array.isArray(lastUserMessage.content)
+                        ? (lastUserMessage.content as unknown[])
+                            .filter((b): b is { type: "text"; text: string } => !!b && typeof b === "object" && "type" in b && b.type === "text")
+                            .map((b) => b.text)
+                            .join("\n")
+                        : "")
                 : undefined;
               return (
-                <MessageView 
-                  message={streamState.streamingMessage as AgentMessage} 
-                  isStreaming 
-                  modelNames={modelNames} 
-                  activeModel={displayModelValue} 
+                <MessageView
+                  message={streamState.streamingMessage as AgentMessage}
+                  isStreaming
+                  modelNames={modelNames}
+                  activeModel={displayModelValue}
                   prevUserContent={streamingPrevUserContent}
                   cwd={session?.cwd || newSessionCwd}
                 />
@@ -444,6 +587,32 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       </div>
       </>
       )}
+
+      {/* Pipeline panel — renders in ALL cases (empty new session or existing) */}
+      {pipelineActive && (
+        <div style={{ padding: '8px 16px', overflow: 'auto', maxHeight: '55vh', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ maxWidth: 820, margin: '0 auto' }}>
+            <PipelinePanel
+              state={pipeline.state}
+              config={pipeline.config}
+              onConfigChange={pipeline.setConfig}
+              onStart={pipeline.start}
+              onStartWithLink={pipeline.startWithLink}
+              onRewrite={pipeline.startRewrite}
+              onRetry={pipeline.retry}
+              onReset={pipeline.reset}
+              onTriggerTts={pipeline.triggerTts}
+              onClose={() => onPipelineDeactivate?.()}
+              modelList={modelList}
+              currentModelKey={displayModelValue ? `${displayModelValue.provider}/${displayModelValue.modelId}` : undefined}
+              onModelChange={handleModelChange}
+              onOpenCookieConfig={() => setCookieModalOpen(true)}
+            />
+          </div>
+        </div>
+      )}
+      {/* ⚙️ Bilibili Cookie Configuration Modal */}
+      <BilibiliCookieModal isOpen={cookieModalOpen} onClose={() => setCookieModalOpen(false)} />
     </div>
   );
 }

@@ -152,6 +152,13 @@ export interface SessionInfoEntry extends SessionEntryBase {
   name?: string;
 }
 
+export interface GemInfoEntry extends SessionEntryBase {
+  type: "gem_info";
+  gemId: string;
+  gemName: string;
+  gemAvatar: string;
+}
+
 export type SessionEntry =
   | SessionMessageEntry
   | ThinkingLevelChangeEntry
@@ -161,7 +168,8 @@ export type SessionEntry =
   | CustomEntry
   | CustomMessageEntry
   | LabelEntry
-  | SessionInfoEntry;
+  | SessionInfoEntry
+  | GemInfoEntry;
 
 export type FileEntry = SessionHeader | SessionEntry;
 
@@ -182,6 +190,9 @@ export interface SessionInfo {
   firstMessage: string;
   parentSessionId?: string; // set if this session was forked from another
   locked?: boolean;
+  gemId?: string; // Gem-xY agent id if this session uses a custom agent
+  gemName?: string; // Gem display name
+  gemAvatar?: string; // Gem emoji avatar
 }
 
 export interface SessionContext {

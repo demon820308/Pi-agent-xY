@@ -162,30 +162,7 @@ export function findModel(registry: any, provider: string, modelId: string): any
   const pid = provider.toLowerCase();
   const mid = modelId.toLowerCase();
 
-  // 1. Resolve MiniMax-M3 override (MiniMax-M3 uses openai-completions API format, M2.7 uses anthropic-messages)
-  if (pid === "minimax-cn" && modelId === "MiniMax-M3") {
-    const base = registry.find("minimax-cn", "MiniMax-M2.7") || 
-                 registry.find("minimax-cn", "MiniMax-M2.7-highspeed");
-    return base ? {
-      ...base,
-      id: "MiniMax-M3",
-      name: "MiniMax-M3",
-      api: "openai-completions",
-      baseUrl: base.baseUrl.includes("anthropic") ? base.baseUrl.replace("/anthropic", "/v1") : "https://api.minimaxi.com/v1",
-      reasoning: true,
-    } : {
-      id: "MiniMax-M3",
-      name: "MiniMax-M3",
-      api: "openai-completions",
-      provider: "minimax-cn",
-      baseUrl: "https://api.minimaxi.com/v1",
-      reasoning: true,
-      input: ["text"],
-      cost: { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0.375 },
-      contextWindow: 204800,
-      maxTokens: 131072
-    };
-  }
+
 
   // 2. Generic provider fallback (Clones base model for same provider)
   const regModels = (registry as any).models || [];

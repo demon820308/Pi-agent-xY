@@ -5,6 +5,8 @@ import { isVisionModel } from "@/lib/vision";
 import { isTtsModel, isVoiceDesignModel, isVoiceCloneModel, isBaseTtsModel } from "@/lib/tts-utils";
 import { encodeFilePathForApi, joinFilePath } from "@/lib/file-paths";
 import { TtsPanel } from "./TtsPanel";
+import { useVideoScript } from "@/hooks/useVideoScript";
+import { isVideoFile } from "@/lib/video-audio-extractor";
 
 export interface AttachedImage {
   data: string;   // base64, no prefix
@@ -42,6 +44,7 @@ interface Props {
   soundEnabled?: boolean;
   onSoundToggle?: () => void;
   cwd?: string | null;
+  onOpenCookieConfig?: () => void;
 }
 
 export interface ChatInputHandle {
@@ -260,12 +263,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   retryInfo,
   soundEnabled, onSoundToggle,
   cwd,
+  onOpenCookieConfig,
 }: Props, ref) {
   const [value, setValue] = useState("");
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [toolDropdownOpen, setToolDropdownOpen] = useState(false);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
+  const [videoUploadDropdownOpen, setVideoUploadDropdownOpen] = useState(false);
+  const [videoLinkUrl, setVideoLinkUrl] = useState("");
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
   const [attachedFiles, setAttachedFiles] = useState<{ file: File; name: string; size: number }[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -280,6 +286,40 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
   // Model-Adaptive Voice Workspace States
   const [voiceConsoleOpen, setVoiceConsoleOpen] = useState(false);
+
+  // Track video extraction source (immune to stale closures via ref)
+  const extractionSourceRef = useRef<{ type: "link" | "file"; value: string } | null>(null);
+
+  // Video → Script extraction pipeline (auto-detect language)
+  const videoScript = useVideoScript({
+    language: '',
+    onComplete: (text) => {
+      const source = extractionSourceRef.current;
+      const displayPrefix = source?.type === 'link' 
+        ? `提取视频中的文案\n视频链接：${source.value}` 
+        : `提取视频中的文案\n本地视频：${source?.value || '未命名视频'}`;
+
+      const fullMessage = `${displayPrefix}\n<!-- PI_HIDDEN_START -->\n以下是从音视频中提取出来的原始文案，目前没有任何标点符号，并且由于语音识别（ASR）技术限制，可能会有部分错别字或同音字。\n请你在不改变原意、不删减关键内容的前提下，进行简单的标点润色：\n1. 合理加上中文标点符号（逗号、句号、问号、感叹号等），并进行简单的自然分段以方便阅读。\n2. 修正明显的同音错别字。\n3. 直接输出加好标点、润色分段后的文案，不要输出任何解释、分析、Markdown 格式标记或代码块包裹，仅返回处理后的纯文本内容。\n\n${text}\n<!-- PI_HIDDEN_END -->`;
+
+      onSend(fullMessage);
+      extractionSourceRef.current = null;
+    },
+    onError: (err) => setDescribeError(err),
+  })
+
+  const getPolishModel = () => {
+    const isTts = model ? isTtsModel(model.provider, model.modelId) : false;
+    if (model && !isTts) {
+      return { provider: model.provider, modelId: model.modelId };
+    }
+    const fallback = modelList?.find(m => !m.id.toLowerCase().includes("tts"));
+    if (fallback) {
+      return { provider: fallback.provider, modelId: fallback.id };
+    }
+    return null;
+  };
+
+
 
   const insertAudioTag = (tag: string) => {
     const ta = textareaRef.current;
@@ -352,7 +392,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         setRecordingSeconds((s) => s + 1);
       }, 1000);
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Failed to start recording:", err);
       setDescribeError("麦克风启动失败，请检查浏览器是否已授权麦克风权限！");
     }
@@ -381,8 +421,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const modelDropdownPanelRef = useRef<HTMLDivElement>(null);
   const toolDropdownRef = useRef<HTMLDivElement>(null);
   const thinkingDropdownRef = useRef<HTMLDivElement>(null);
+  const videoUploadDropdownRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fileUploadInputRef = useRef<HTMLInputElement>(null);
+  const videoFileInputRef = useRef<HTMLInputElement>(null);
 
   useImperativeHandle(ref, () => ({
     insertIfEmpty(text: string) {
@@ -640,9 +682,10 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
         const uploadedNotes = "\n\n<!-- PI_FILE_ATTACHMENTS_START -->\n📄 [已上传文件到工作区]\n" + uploaded.map(f => `- Temp/${f.name} (${formatBytes(f.size)})`).join("\n") + "\n<!-- PI_FILE_ATTACHMENTS_END -->";
         finalMsg = finalMsg ? `${finalMsg}${uploadedNotes}` : uploadedNotes.trim();
         setAttachedFiles([]);
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("Upload error:", err);
-        setDescribeError(err.message || "上传文件过程中出现未知错误");
+        const errMsg = err instanceof Error ? err.message : String(err);
+        setDescribeError(errMsg || "上传文件过程中出现未知错误");
         setIsUploading(false);
         return;
       }
@@ -698,9 +741,10 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
         const uploadedNotes = "\n\n<!-- PI_FILE_ATTACHMENTS_START -->\n📄 [已上传文件到工作区]\n" + uploaded.map(f => `- Temp/${f.name} (${formatBytes(f.size)})`).join("\n") + "\n<!-- PI_FILE_ATTACHMENTS_END -->";
         finalMsg = finalMsg ? `${finalMsg}${uploadedNotes}` : uploadedNotes.trim();
         setAttachedFiles([]);
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("Upload error:", err);
-        setDescribeError(err.message || "上传文件过程中出现未知错误");
+        const errMsg = err instanceof Error ? err.message : String(err);
+        setDescribeError(errMsg || "上传文件过程中出现未知错误");
         setIsUploading(false);
         return;
       }
@@ -789,6 +833,9 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
       if (thinkingDropdownRef.current && !thinkingDropdownRef.current.contains(e.target as Node)) {
         setThinkingDropdownOpen(false);
       }
+      if (videoUploadDropdownRef.current && !videoUploadDropdownRef.current.contains(e.target as Node)) {
+        setVideoUploadDropdownOpen(false);
+      }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -825,7 +872,17 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
         style={{ display: "none" }}
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
-          processFiles(files);
+          const videoFiles = files.filter(isVideoFile)
+          const otherFiles = files.filter((f) => !isVideoFile(f))
+          if (videoFiles.length > 0) {
+            // Process first video through the script extraction pipeline
+            const filePath = (videoFiles[0] as any).path || videoFiles[0].name;
+            extractionSourceRef.current = { type: 'file', value: filePath };
+            videoScript.process(videoFiles[0], getPolishModel());
+          }
+          if (otherFiles.length > 0) {
+            processFiles(otherFiles);
+          }
           e.target.value = "";
         }}
       />
@@ -1009,6 +1066,48 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
           </div>
         )}
 
+        {/* Video script extraction progress */}
+        {(videoScript.state === 'extracting' || videoScript.state === 'transcribing' || videoScript.state === 'polishing') && (
+          <div style={{
+            marginBottom: 8, padding: '6px 10px',
+            background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)',
+            borderRadius: 6, fontSize: 12, color: '#10b981',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" style={{ animation: 'spin 1s linear infinite' }}>
+                <circle cx="12" cy="12" r="10" stroke="rgba(16,185,129,0.2)" />
+                <path d="M12 2a10 10 0 0 1 10 10" />
+              </svg>
+              <span>{videoScript.statusText}</span>
+            </div>
+            <div style={{
+              height: 3, borderRadius: 2, background: 'rgba(16,185,129,0.15)', overflow: 'hidden',
+            }}>
+              <div style={{
+                width: `${Math.round(videoScript.progress * 100)}%`,
+                height: '100%', borderRadius: 2, background: '#10b981',
+                transition: 'width 0.3s ease',
+              }} />
+            </div>
+          </div>
+        )}
+        {videoScript.state === 'error' && (
+          <div style={{
+            marginBottom: 8, padding: '5px 10px',
+            background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)',
+            borderRadius: 6, fontSize: 12, color: '#ef4444',
+            display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            {videoScript.statusText}
+            <button onClick={videoScript.reset} style={{
+              marginLeft: 'auto', padding: '1px 6px', background: 'none', border: '1px solid rgba(239,68,68,0.3)',
+              borderRadius: 4, color: '#ef4444', fontSize: 10, cursor: 'pointer',
+            }}>
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {/* File previews */}
         {attachedFiles.length > 0 && (
           <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
@@ -1085,6 +1184,7 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
           voiceConsoleOpen={voiceConsoleOpen}
           setVoiceConsoleOpen={setVoiceConsoleOpen}
           insertAudioTag={insertAudioTag}
+          cwd={cwd}
         />
 
         {/* Main input */}
@@ -1184,6 +1284,7 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
               )}
             </div>
           ) : (
+            <>
             <button
               onClick={handleSend}
               disabled={!value.trim() && !attachedImages.length && !attachedFiles.length}
@@ -1210,6 +1311,7 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
               </svg>
               Send
             </button>
+            </>
           )}
         </div>
 
@@ -1248,10 +1350,160 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
                 <polyline points="21 15 16 10 5 21" />
               </svg>
             </button>
+
+            {/* Video or Link Extract Button & Dropdown */}
+            <div ref={videoUploadDropdownRef} style={{ position: "relative" }}>
+              <button
+                onClick={() => !isStreaming && setVideoUploadDropdownOpen((v) => !v)}
+                disabled={isStreaming}
+                title="上传视频或提取视频链接文案"
+                style={{
+                  flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                  width: 32, height: 32, padding: 0,
+                  background: videoUploadDropdownOpen ? "var(--bg-hover)" : "none", border: "none",
+                  borderRadius: 9,
+                  color: "var(--text-muted)",
+                  cursor: isStreaming ? "not-allowed" : "pointer",
+                  opacity: isStreaming ? 0.5 : 1,
+                  transition: "background 0.12s, color 0.12s",
+                }}
+                onMouseEnter={(e) => {
+                  if (isStreaming) return;
+                  e.currentTarget.style.background = "var(--bg-hover)";
+                  e.currentTarget.style.color = "var(--text)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = videoUploadDropdownOpen ? "var(--bg-hover)" : "none";
+                  e.currentTarget.style.color = "var(--text-muted)";
+                }}
+              >
+                {/* Combined video/link style icon: a video camera */}
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M23 7l-7 5 7 5V7z" />
+                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                </svg>
+              </button>
+              {videoUploadDropdownOpen && (
+                <div style={{
+                  position: "absolute", bottom: "calc(100% + 6px)", left: 0,
+                  zIndex: 100, background: "var(--bg-panel)", border: "1px solid var(--border)",
+                  borderRadius: 10, boxShadow: "0 -4px 20px rgba(0,0,0,0.15)",
+                  padding: 12, width: 390, display: "flex", flexDirection: "column", gap: 10
+                }}>
+                  {/* Local Video Upload Option */}
+                  <button
+                    onClick={() => {
+                      setVideoUploadDropdownOpen(false);
+                      videoFileInputRef.current?.click();
+                    }}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      width: "100%", padding: "8px 10px",
+                      background: "none", border: "1px solid var(--border)", borderRadius: 6,
+                      color: "var(--text)", cursor: "pointer", fontSize: 12, textAlign: "left",
+                      transition: "background 0.12s"
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = "var(--bg-hover)"}
+                    onMouseLeave={(e) => e.currentTarget.style.background = "none"}
+                  >
+                    <span style={{ fontSize: 14 }}>💻</span>
+                    <span style={{ fontSize: 12, fontWeight: 500 }}>上传本地视频文件</span>
+                  </button>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                    <span style={{ fontSize: 10, color: "var(--text-dim)" }}>或</span>
+                    <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                  </div>
+
+                  {/* Video Link Input Option */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>
+                      粘贴视频链接 (B站/抖音/小红书/YouTube):
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <input
+                        type="text"
+                        value={videoLinkUrl}
+                        onChange={(e) => setVideoLinkUrl(e.target.value)}
+                        placeholder="粘贴链接并回车..."
+                        style={{
+                          flex: 1, padding: "5px 8px", borderRadius: 6, fontSize: 12,
+                          border: "1px solid var(--border)", background: "var(--bg)",
+                          color: "var(--text)", outline: "none",
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && videoLinkUrl.trim()) {
+                            extractionSourceRef.current = { type: 'link', value: videoLinkUrl.trim() };
+                            videoScript.processLink(videoLinkUrl.trim(), getPolishModel());
+                            setVideoLinkUrl("");
+                            setVideoUploadDropdownOpen(false);
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={() => {
+                          if (videoLinkUrl.trim()) {
+                            extractionSourceRef.current = { type: 'link', value: videoLinkUrl.trim() };
+                            videoScript.processLink(videoLinkUrl.trim(), getPolishModel());
+                            setVideoLinkUrl("");
+                            setVideoUploadDropdownOpen(false);
+                          }
+                        }}
+                        disabled={!videoLinkUrl.trim() || videoScript.state === 'extracting' || videoScript.state === 'transcribing' || videoScript.state === 'polishing'}
+                        style={{
+                          padding: "5px 10px", borderRadius: 6, fontSize: 12, fontWeight: 600,
+                          border: "none", background: videoLinkUrl.trim() ? "var(--accent)" : "var(--border)",
+                          color: videoLinkUrl.trim() ? "#fff" : "var(--text-dim)",
+                          cursor: videoLinkUrl.trim() ? "pointer" : "not-allowed",
+                        }}
+                      >
+                        提取
+                      </button>
+                    </div>
+                    <div style={{ marginTop: 4, display: "flex", justifyContent: "flex-end" }}>
+                      <button
+                        onClick={() => {
+                          setVideoUploadDropdownOpen(false);
+                          onOpenCookieConfig?.();
+                        }}
+                        style={{
+                          background: "none", border: "none", color: "var(--accent)",
+                          fontSize: 10, cursor: "pointer", display: "flex", alignItems: "center",
+                          gap: 3, padding: "2px 4px", borderRadius: 4, transition: "background 0.15s"
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = "var(--bg-hover)"}
+                        onMouseLeave={(e) => e.currentTarget.style.background = "none"}
+                      >
+                        ⚙️ B站 Cookie 配置
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Hidden Video Input */}
+            <input
+              ref={videoFileInputRef}
+              type="file"
+              accept="video/*"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  const filePath = (file as any).path || file.name;
+                  extractionSourceRef.current = { type: 'file', value: filePath };
+                  videoScript.process(file, getPolishModel());
+                }
+                e.target.value = "";
+              }}
+            />
+
             <button
               onClick={() => fileUploadInputRef.current?.click()}
               disabled={isStreaming || isUploading}
-              title="Upload files to workspace"
+              title="Upload files (video for script extraction, or any file to attach)"
               style={{
                 flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
                 width: 32, height: 32, padding: 0,

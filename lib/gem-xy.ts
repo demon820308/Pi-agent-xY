@@ -40,6 +40,19 @@ export function saveGem(gemData: Partial<GemProfile> & { name: string; systemPro
   const gems = readGems();
   const now = new Date().toISOString();
 
+  // Check if a preset Gem-xY 文案助手 already exists
+  const existingPreset = gems.find((g) => g.name === "Gem-xY 文案助手");
+  if (existingPreset) {
+    // Block modifying the existing preset
+    if (gemData.id && gemData.id === existingPreset.id) {
+      throw new Error("不能修改预置的 \"Gem-xY 文案助手\" 智能体");
+    }
+    // Block creating a new one with the same name
+    if (gemData.name === "Gem-xY 文案助手" && gemData.id !== existingPreset.id) {
+      throw new Error("不能创建同名智能体 \"Gem-xY 文案助手\"");
+    }
+  }
+
   let targetGem: GemProfile;
 
   if (gemData.id) {
@@ -92,6 +105,12 @@ export function saveGem(gemData: Partial<GemProfile> & { name: string; systemPro
 
 export function deleteGem(id: string): boolean {
   const gems = readGems();
+  
+  const target = gems.find((g) => g.id === id);
+  if (target && target.name === "Gem-xY 文案助手") {
+    throw new Error("不能删除预置的 \"Gem-xY 文案助手\" 智能体");
+  }
+
   const initialLength = gems.length;
   const filtered = gems.filter((g) => g.id !== id);
 

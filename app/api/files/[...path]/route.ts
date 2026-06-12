@@ -105,7 +105,7 @@ declare global {
 }
 
 const ALLOWED_ROOTS_TTL_MS = 5_000;
-const WINDOWS_ABSOLUTE_RE = /^[a-zA-Z]:[\\/]/;
+const WINDOWS_ABSOLUTE_RE = /^[a-zA-Z]:(?:[\\/]|$)/;
 
 function normalizeSlashes(filePath: string): string {
   return filePath.replace(/\\/g, "/");
@@ -118,7 +118,12 @@ function isWindowsAbsolutePath(filePath: string): boolean {
 function filePathFromSegments(segments: string[]): string {
   const joined = segments.join("/");
   const slashJoined = normalizeSlashes(joined);
-  if (isWindowsAbsolutePath(slashJoined)) return slashJoined;
+  if (isWindowsAbsolutePath(slashJoined)) {
+    if (/^[a-zA-Z]:$/.test(slashJoined)) {
+      return slashJoined + "/";
+    }
+    return slashJoined;
+  }
   return "/" + joined.replace(/^\/+/, "");
 }
 

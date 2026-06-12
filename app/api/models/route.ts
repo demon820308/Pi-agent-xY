@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { AuthStorage, ModelRegistry, SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { writeFileSync, readFileSync, existsSync } from "fs";
@@ -64,9 +65,6 @@ export async function GET() {
     modelList = modelList.filter(m => !(m.provider.startsWith("minimax") && m.id === "MiniMax-M2.7-highspeed"));
     
     const minimaxProviders = Array.from(new Set(modelList.filter(m => m.provider.startsWith("minimax")).map(m => m.provider)));
-    if (minimaxProviders.length === 0) {
-      minimaxProviders.push("minimax-cn");
-    }
     
     for (const provider of minimaxProviders) {
       if (!modelList.some(m => m.provider === provider && m.id === "MiniMax-M3")) {
@@ -74,7 +72,7 @@ export async function GET() {
           id: "MiniMax-M3",
           name: "MiniMax-M3",
           provider: provider,
-          supportsVision: false
+          supportsVision: true
         });
         const key = `${provider}:MiniMax-M3`;
         nameMap.set(key, "MiniMax-M3");
@@ -84,9 +82,6 @@ export async function GET() {
 
     // 2. Set up the exact 9 mimo models for xiaomi-token-plan-cn and xiaomi-token-plan and any other mimo provider
     const mimoProviders = Array.from(new Set(modelList.filter(m => m.provider.includes("xiaomi-token-plan") || m.provider.includes("mimo")).map(m => m.provider)));
-    if (mimoProviders.length === 0) {
-      mimoProviders.push("xiaomi-token-plan-cn", "xiaomi-token-plan");
-    }
 
     const exactMimoModels = [
       { id: "mimo-v2.5-pro", name: "MiMo-V2.5-Pro", supportsVision: true },

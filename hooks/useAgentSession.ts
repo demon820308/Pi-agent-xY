@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useReducer } from "react";
-import type { AgentMessage, SessionInfo, SessionTreeNode } from "@/lib/types";
+import type { AgentMessage, SessionInfo, SessionTreeNode, GemProfile } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
 import { sendAgentCommand } from "@/lib/agent-client";
 import { isVisionModel } from "@/lib/vision";
@@ -45,7 +45,7 @@ function streamReducer(state: StreamingState, action: StreamAction): StreamingSt
   }
 }
 
-interface AgentEvent {
+export interface AgentEvent {
   type: string;
   [key: string]: unknown;
 }
@@ -68,6 +68,7 @@ export interface UseAgentSessionOptions {
   setNewSessionModel?: (model: { provider: string; modelId: string } | null) => void;
   setToolPreset?: (preset: "none" | "default" | "full") => void;
   activeGemId?: string | null;
+  onAgentEvent?: (event: AgentEvent) => void;
 }
 
 export type ThinkingLevelOption = "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -87,7 +88,7 @@ export interface AttachedImage {
 export function useAgentSession(opts: UseAgentSessionOptions) {
   const {
     session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked,
-    modelsRefreshKey, onBranchDataChange, onSystemPromptChange,
+    modelsRefreshKey, onBranchDataChange, onSystemPromptChange, onAgentEvent,
   } = opts;
 
   const isNew = session === null && newSessionCwd !== null;
@@ -278,7 +279,39 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     agentRunningRef.current = agentRunning;
   }, [agentRunning]);
 
+  // Load Gem settings for new sessions
+  useEffect(() => {
+    if (isNew && opts.activeGemId) {
+      fetch("/api/gem-xy")
+        .then((r) => r.json())
+        .then((gems: GemProfile[]) => {
+          const gem = gems.find((g) => g.id === opts.activeGemId);
+          if (gem) {
+            // Sync tool preset
+            if (gem.allowedTools) {
+              const active = [...gem.allowedTools].sort().join(",");
+              if (active === "") {
+                setToolPresetState("none");
+              } else if (active === ["read", "bash", "edit", "write"].sort().join(",")) {
+                setToolPresetState("default");
+              } else if (active === ["bash", "read", "edit", "write", "grep", "find", "ls"].sort().join(",")) {
+                setToolPresetState("full");
+              } else {
+                setToolPresetState("default");
+              }
+            }
+            // Sync model
+            if (gem.provider && gem.modelId) {
+              setNewSessionModel({ provider: gem.provider, modelId: gem.modelId });
+            }
+          }
+        })
+        .catch((e) => console.error("Failed to load Gem settings:", e));
+    }
+  }, [isNew, opts.activeGemId, setNewSessionModel, setToolPresetState]);
+
   const handleAgentEvent = useCallback((event: AgentEvent) => {
+    onAgentEvent?.(event);
     switch (event.type) {
       case "agent_start":
         setAgentRunning(true);
@@ -381,7 +414,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
         break;
     }
-  }, [loadSession, onAgentEnd]);
+  }, [loadSession, onAgentEnd, onAgentEvent]);
   handleAgentEventRef.current = handleAgentEvent;
 
   const getProcessedMessage = useCallback(async (message: string, images?: AttachedImage[]) => {
@@ -491,6 +524,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           modified: new Date().toISOString(),
           messageCount: 1,
           firstMessage: message,
+          gemId: opts.activeGemId || undefined,
         });
       } else if (session) {
         // Ensure SSE is open before firing prompt so events aren't missed
@@ -776,6 +810,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handleAbortCompaction,
     handleToolPresetChange, handleThinkingLevelChange, loadTools, setActiveLeafId, setData, setMessages,
+    loadSession,
     dispatch, setAgentRunning, setForkingEntryId,
     // Subscriptions
     handleAgentEventRef,

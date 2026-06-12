@@ -108,9 +108,8 @@ export function isVisionModel(provider: string, modelId: string): boolean {
     (mid.includes("doubao") && (mid.includes("vision") || mid.includes("vl"))) ||
     // Kimi / Moonshot models (matching Kimi K2.6, kimi-2.6, etc.)
     ((mid.includes("kimi") || mid.includes("moonshot")) && (mid.includes("vision") || mid.includes("vl") || mid.includes("2.6") || mid.includes("k2"))) ||
-    // MiniMax Vision models
     (mid.includes("abab") && (mid.includes("vision") || mid.includes("vl"))) ||
-    (mid.includes("minimax") && (mid.includes("vision") || mid.includes("vl"))) ||
+    (mid.includes("minimax") && (mid.includes("vision") || mid.includes("vl") || mid.includes("m3"))) ||
     mid.includes("hailuo")
   ) {
     return true;

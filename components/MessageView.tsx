@@ -37,6 +37,7 @@ interface Props {
   activeModel?: { provider: string; modelId: string } | null;
   prevUserContent?: string;
   cwd?: string | null;
+  isPipelineSynthesizing?: boolean;
 }
 
 function formatTime(ts?: number): string | null {
@@ -77,22 +78,39 @@ interface ParsedAttachment {
   size?: string;
 }
 
+function stripHiddenContent(text: string): string {
+  const startTag = "<!-- PI_HIDDEN_START -->";
+  const endTag = "<!-- PI_HIDDEN_END -->";
+
+  let result = text;
+  while (true) {
+    const startIndex = result.indexOf(startTag);
+    const endIndex = result.indexOf(endTag);
+    if (startIndex === -1 || endIndex === -1 || startIndex >= endIndex) {
+      break;
+    }
+    result = result.substring(0, startIndex) + result.substring(endIndex + endTag.length);
+  }
+  return result;
+}
+
 function parseAttachments(text: string): { cleanText: string; attachments: ParsedAttachment[] } {
-  if (!text) return { cleanText: "", attachments: [] };
+  const filteredText = stripHiddenContent(text);
+  if (!filteredText) return { cleanText: "", attachments: [] };
 
   const startTag = "<!-- PI_FILE_ATTACHMENTS_START -->";
   const endTag = "<!-- PI_FILE_ATTACHMENTS_END -->";
 
-  const startIndex = text.indexOf(startTag);
-  const endIndex = text.indexOf(endTag);
+  const startIndex = filteredText.indexOf(startTag);
+  const endIndex = filteredText.indexOf(endTag);
 
   if (startIndex === -1 || endIndex === -1 || startIndex >= endIndex) {
-    return { cleanText: text, attachments: [] };
+    return { cleanText: filteredText, attachments: [] };
   }
 
-  const before = text.substring(0, startIndex);
-  const after = text.substring(endIndex + endTag.length);
-  const inner = text.substring(startIndex + startTag.length, endIndex).trim();
+  const before = filteredText.substring(0, startIndex);
+  const after = filteredText.substring(endIndex + endTag.length);
+  const inner = filteredText.substring(startIndex + startTag.length, endIndex).trim();
 
   const cleanText = (before.trim() + "\n" + after.trim()).trim();
 
@@ -310,7 +328,7 @@ function AttachmentChips({ attachments, cwd }: { attachments: ParsedAttachment[]
   );
 }
 
-export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, activeModel, prevUserContent, cwd }: Props) {
+export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, activeModel, prevUserContent, cwd, isPipelineSynthesizing }: Props) {
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
 
   const lightbox = zoomedImage && (
@@ -393,7 +411,7 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
   if (message.role === "assistant") {
     return (
       <>
-        <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} onZoomImage={setZoomedImage} activeModel={activeModel} entryId={entryId} prevUserContent={prevUserContent} cwd={cwd} />
+        <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} onZoomImage={setZoomedImage} activeModel={activeModel} entryId={entryId} prevUserContent={prevUserContent} cwd={cwd} isPipelineSynthesizing={isPipelineSynthesizing} />
         {lightbox}
       </>
     );
@@ -624,6 +642,7 @@ function AssistantMessageView({
   entryId,
   prevUserContent,
   cwd,
+  isPipelineSynthesizing,
 }: {
   message: AssistantMessage;
   isStreaming?: boolean;
@@ -636,6 +655,7 @@ function AssistantMessageView({
   entryId?: string;
   prevUserContent?: string;
   cwd?: string | null;
+  isPipelineSynthesizing?: boolean;
 }) {
   const time = showTimestamp ? formatTime(message.timestamp) : null;
   const [voiceSettings, setVoiceSettings] = useState<{
@@ -897,7 +917,7 @@ function AssistantMessageView({
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {blocks.map((block, i) => (
-          <BlockView key={i} block={block} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(i) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} onZoomImage={onZoomImage} />
+          <BlockView key={i} block={block} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(i) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} onZoomImage={onZoomImage} cwd={cwd} />
         ))}
         {isFallback && (() => {
           const { cleanText: fallbackCleanText, attachments: fallbackAttachments } = parseAttachments(prevUserContent || "");
@@ -1218,9 +1238,9 @@ function AssistantMessageView({
   );
 }
 
-function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCallDurations, onZoomImage }: { block: AssistantContentBlock; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number>; onZoomImage?: (src: string) => void }) {
+function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCallDurations, onZoomImage, cwd }: { block: AssistantContentBlock; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number>; onZoomImage?: (src: string) => void; cwd?: string | null }) {
   if (block.type === "text") {
-    return <TextBlock block={block as TextContent} onZoomImage={onZoomImage} isStreaming={isStreaming} />;
+    return <TextBlock block={block as TextContent} onZoomImage={onZoomImage} isStreaming={isStreaming} cwd={cwd} />;
   }
   if (block.type === "thinking") {
     return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} />;
@@ -1234,7 +1254,11 @@ function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCal
   return null;
 }
 
-function TextBlock({ block, onZoomImage, isStreaming }: { block: TextContent; onZoomImage?: (src: string) => void; isStreaming?: boolean }) {
+function TextBlock({ block, onZoomImage, isStreaming, cwd }: { block: TextContent; onZoomImage?: (src: string) => void; isStreaming?: boolean; cwd?: string | null }) {
+  const { cleanText, attachments } = useMemo(() => {
+    return parseAttachments(block.text);
+  }, [block.text]);
+
   return (
     <div className="markdown-body">
       <ReactMarkdown
@@ -1281,8 +1305,9 @@ function TextBlock({ block, onZoomImage, isStreaming }: { block: TextContent; on
           },
         }}
       >
-        {block.text}
+        {cleanText}
       </ReactMarkdown>
+      <AttachmentChips attachments={attachments} cwd={cwd} />
     </div>
   );
 }

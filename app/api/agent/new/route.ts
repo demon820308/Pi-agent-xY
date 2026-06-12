@@ -34,10 +34,18 @@ export async function POST(req: Request) {
     let activeProvider = reqProvider;
     let activeModelId = reqModelId;
     let customSystemPrompt: string | undefined;
+    let gemInfo: { gemId: string; gemName: string; gemAvatar: string } | undefined;
 
     if (gemId) {
       const gem = getGemById(gemId);
       if (gem) {
+        // Store gem info for writing to session file
+        gemInfo = {
+          gemId: gem.id,
+          gemName: gem.name,
+          gemAvatar: gem.avatar || "🤖",
+        };
+
         // Apply Gem-xY custom model if configured
         if (gem.provider && gem.modelId) {
           activeProvider = gem.provider;
@@ -45,7 +53,7 @@ export async function POST(req: Request) {
         }
 
         // Apply Gem-xY custom tool filter if configured
-        if (gem.allowedTools && gem.allowedTools.length > 0) {
+        if (Array.isArray(gem.allowedTools)) {
           activeToolNames = gem.allowedTools;
         }
 
@@ -73,7 +81,7 @@ export async function POST(req: Request) {
     }
 
     const tempKey = `__new__${Date.now()}`;
-    const { session, realSessionId } = await startRpcSession(tempKey, "", cwd, activeToolNames, customSystemPrompt);
+    const { session, realSessionId } = await startRpcSession(tempKey, "", cwd, activeToolNames, customSystemPrompt, gemInfo);
 
     // Keep the files-route allowed-roots cache (see app/api/files/[...path]/route.ts)
     // in sync so the new cwd is immediately readable via /api/files. Without this,

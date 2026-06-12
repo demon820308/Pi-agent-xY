@@ -24,6 +24,7 @@ export async function DELETE(req: Request, context: RouteParams) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 }

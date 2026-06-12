@@ -107,7 +107,9 @@ function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
       const lockA = a.session.locked ? 1 : 0;
       const lockB = b.session.locked ? 1 : 0;
       if (lockA !== lockB) return lockB - lockA;
-      return b.session.modified.localeCompare(a.session.modified);
+      const diff = b.session.modified.localeCompare(a.session.modified);
+      if (diff !== 0) return diff;
+      return b.session.created.localeCompare(a.session.created);
     });
     nodes.forEach((n) => sort(n.children));
   };
@@ -234,7 +236,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       const res = await fetch("/api/gem-xy");
       if (!res.ok) throw new Error("Failed to load Gem-xY profiles");
       const data = await res.json() as GemProfile[];
-      setGems(data);
+      setGems(data.filter((g) => g.name !== "Gem-xY 文案助手"));
     } catch (e) {
       console.error(e);
     }
@@ -392,8 +394,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, [selectedCwd, onNewSession]);
 
   const recentCwds = getRecentCwds(allSessions);
+  // Filter by selected cwd, but always include sessions with gemId (agent sessions)
   const filteredSessions = selectedCwd
-    ? allSessions.filter((s) => s.cwd === selectedCwd)
+    ? allSessions.filter((s) => s.cwd === selectedCwd || !!s.gemId)
     : allSessions;
 
   // Build parent-child tree within the filtered set
@@ -828,51 +831,53 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                       </div>
                       
                       {/* Actions */}
-                      <div
-                        className="gem-actions"
-                        style={{
-                          display: "flex",
-                          gap: 4,
-                          flexShrink: 0,
-                          opacity: 0,
-                          transition: "opacity 0.15s",
-                        }}
-                      >
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingGemId(gem.id);
-                            setIsGemModalOpen(true);
-                          }}
-                          title="编辑"
+                      {gem.name !== "Gem-xY 文案助手" && (
+                        <div
+                          className="gem-actions"
                           style={{
-                            background: "none",
-                            border: "none",
-                            color: "var(--text-dim)",
-                            cursor: "pointer",
-                            padding: 2,
+                            display: "flex",
+                            gap: 4,
+                            flexShrink: 0,
+                            opacity: 0,
+                            transition: "opacity 0.15s",
                           }}
-                          onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
                         >
-                          ✎
-                        </button>
-                        <button
-                          onClick={(e) => handleDeleteGem(e, gem.id)}
-                          title="删除"
-                          style={{
-                            background: "none",
-                            border: "none",
-                            color: "var(--text-dim)",
-                            cursor: "pointer",
-                            padding: 2,
-                          }}
-                          onMouseEnter={(e) => { e.currentTarget.style.color = "#ef4444"; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
-                        >
-                          🗑
-                        </button>
-                      </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingGemId(gem.id);
+                              setIsGemModalOpen(true);
+                            }}
+                            title="编辑"
+                            style={{
+                              background: "none",
+                              border: "none",
+                              color: "var(--text-dim)",
+                              cursor: "pointer",
+                              padding: 2,
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
+                          >
+                            ✎
+                          </button>
+                          <button
+                            onClick={(e) => handleDeleteGem(e, gem.id)}
+                            title="删除"
+                            style={{
+                              background: "none",
+                              border: "none",
+                              color: "var(--text-dim)",
+                              cursor: "pointer",
+                              padding: 2,
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.color = "#ef4444"; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
+                          >
+                            🗑
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })
@@ -1182,7 +1187,9 @@ function SessionItem({
   }, []);
 
   // Fixed-height outer wrapper — content swaps in place so the list never reflows
-  const ITEM_HEIGHT = 54;
+  // Sessions with Gem info need extra height for the Gem line
+  const hasGem = !!session.gemId;
+  const ITEM_HEIGHT = hasGem ? 76 : 54;
 
   return (
     <div
@@ -1286,6 +1293,35 @@ function SessionItem({
             </svg>
           )}
           <div style={{ flex: 1, minWidth: 0 }}>
+            {/* Gem info line - shown for sessions using a Gem-xY agent */}
+            {hasGem && (
+              <div
+                style={{
+                  fontSize: 11,
+                  lineHeight: 1.3,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  color: "var(--text-muted)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  marginBottom: 2,
+                  paddingLeft: 2,
+                  borderLeft: "2px solid var(--accent)",
+                  background: "var(--bg-panel)",
+                  borderRadius: "0 4px 4px 0",
+                  padding: "1px 12px 1px 4px",
+                  maxWidth: "100%",
+                }}
+                title={session.gemName || "Gem-xY Agent"}
+              >
+                <span style={{ flexShrink: 0 }}>{session.gemAvatar || "🤖"}</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {session.gemName || "Gem-xY Agent"}
+                </span>
+              </div>
+            )}
             <div
               style={{
                 fontSize: 12,

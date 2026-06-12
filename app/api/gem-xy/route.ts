@@ -29,6 +29,7 @@ export async function POST(req: Request) {
     const saved = saveGem(body);
     return NextResponse.json(saved);
   } catch (error) {
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 }

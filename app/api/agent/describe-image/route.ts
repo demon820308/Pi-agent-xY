@@ -84,6 +84,7 @@ export async function POST(req: Request) {
     let endpoint = "";
     let headers: Record<string, string> = { "Content-Type": "application/json" };
     let useGoogleApi = false;
+    let isAnthropicFormat = false;
 
     // 3. Try to find the model in the registry to get authentic endpoint + headers
     const model = reqProvider && reqModelId ? findModel(registry, reqProvider, reqModelId) : undefined;
@@ -94,7 +95,31 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: `无法解析模型认证: ${auth.error}` }, { status: 400 });
       }
 
-      endpoint = `${model.baseUrl}/chat/completions`;
+      isAnthropicFormat = model.api === "anthropic-messages" || model.provider === "anthropic" || (model.baseUrl && model.baseUrl.includes("/anthropic")) || model.provider.startsWith("minimax");
+
+      if (isAnthropicFormat) {
+        let baseUrl = model.baseUrl || "";
+        if (model.provider.startsWith("minimax") && !baseUrl.includes("/anthropic")) {
+          if (baseUrl.includes("api.minimaxi.com")) {
+            baseUrl = "https://api.minimaxi.com/anthropic";
+          } else if (baseUrl.includes("api.minimax.io")) {
+            baseUrl = "https://api.minimax.io/anthropic";
+          }
+        }
+        if (baseUrl.endsWith("/")) {
+          baseUrl = baseUrl.slice(0, -1);
+        }
+        if (baseUrl.endsWith("/anthropic")) {
+          endpoint = `${baseUrl}/v1/messages`;
+        } else if (baseUrl.endsWith("/messages")) {
+          endpoint = baseUrl;
+        } else {
+          endpoint = `${baseUrl}/messages`;
+        }
+      } else {
+        endpoint = `${model.baseUrl}/chat/completions`;
+      }
+
       if (auth.apiKey) {
         apiKey = auth.apiKey;
         headers["Authorization"] = `Bearer ${apiKey}`;
@@ -174,19 +199,30 @@ export async function POST(req: Request) {
         }, { status: 400 });
       }
 
-      headers["Authorization"] = `Bearer ${apiKey}`;
-      endpoint = "https://api.openai.com/v1/chat/completions";
+      isAnthropicFormat = provider === "anthropic" || provider.startsWith("minimax");
 
-      if (provider === "openrouter") {
-        endpoint = "https://openrouter.ai/api/v1/chat/completions";
-      } else if (provider.includes("xiaomi-token-plan") || provider.includes("mimo") || provider.includes("lingya")) {
-        if (process.env.LINGYA_API_URL) {
-          endpoint = `${process.env.LINGYA_API_URL}/chat/completions`;
+      if (isAnthropicFormat) {
+        if (provider.startsWith("minimax")) {
+          endpoint = "https://api.minimaxi.com/anthropic/v1/messages";
+          headers["Authorization"] = `Bearer ${apiKey}`;
         } else {
-          endpoint = "https://token-plan.api.xiaomi.net/v1/chat/completions";
+          endpoint = "https://api.anthropic.com/v1/messages";
         }
-      } else if (provider === "google" || provider === "gemini") {
-        useGoogleApi = true;
+      } else {
+        headers["Authorization"] = `Bearer ${apiKey}`;
+        endpoint = "https://api.openai.com/v1/chat/completions";
+
+        if (provider === "openrouter") {
+          endpoint = "https://openrouter.ai/api/v1/chat/completions";
+        } else if (provider.includes("xiaomi-token-plan") || provider.includes("mimo") || provider.includes("lingya")) {
+          if (process.env.LINGYA_API_URL) {
+            endpoint = `${process.env.LINGYA_API_URL}/chat/completions`;
+          } else {
+            endpoint = "https://token-plan.api.xiaomi.net/v1/chat/completions";
+          }
+        } else if (provider === "google" || provider === "gemini") {
+          useGoogleApi = true;
+        }
       }
     }
 
@@ -232,47 +268,101 @@ export async function POST(req: Request) {
       });
 
       if (!response.ok) {
-        const errorData = await response.json() as unknown;
-        throw new Error(`Gemini API returned status ${response.status}: ${JSON.stringify(errorData)}`);
+        let errorMsg = `Gemini API returned status ${response.status}`;
+        try {
+          const contentType = response.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            const errorData = await response.json();
+            errorMsg = `Gemini API returned status ${response.status}: ${JSON.stringify(errorData)}`;
+          } else {
+            const text = await response.text();
+            errorMsg = `Gemini API returned status ${response.status}: ${text.substring(0, 300)}`;
+          }
+        } catch {
+          // ignore
+        }
+        throw new Error(errorMsg);
       }
 
       const data = await response.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
       const description = normalizeDescription(data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "");
       return NextResponse.json({ description });
-    } else if (provider === "anthropic") {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          model: modelId || "claude-3-5-sonnet-20241022",
-          max_tokens: 1000,
-          messages: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "image",
-                  source: {
-                    type: "base64",
-                    media_type: normalizedMimeType,
-                    data: base64Data,
-                  },
+    } else if (isAnthropicFormat) {
+      const isOfficialAnthropic = provider === "anthropic";
+      const rawHeaders: Record<string, string> = {};
+
+
+
+      if (isOfficialAnthropic) {
+        rawHeaders["content-type"] = "application/json";
+        rawHeaders["x-api-key"] = apiKey;
+        rawHeaders["anthropic-version"] = "2023-06-01";
+      } else {
+        Object.assign(rawHeaders, headers);
+      }
+
+      // Deduplicate header keys case-insensitively (e.g. Content-Type and content-type)
+      const reqHeaders: Record<string, string> = {};
+      for (const [k, v] of Object.entries(rawHeaders)) {
+        const matchingKey = Object.keys(reqHeaders).find(
+          existingKey => existingKey.toLowerCase() === k.toLowerCase()
+        );
+        if (matchingKey) {
+          reqHeaders[matchingKey] = v;
+        } else {
+          reqHeaders[k] = v;
+        }
+      }
+
+
+      console.log(`[describe-image] Sending to Anthropic-compatible endpoint: ${endpoint}`);
+      console.log(`[describe-image] model: ${modelId}, provider: ${provider}`);
+      console.log(`[describe-image] headers (keys): ${Object.keys(reqHeaders).join(", ")}`);
+
+      const requestBody = {
+        model: modelId || "claude-3-5-sonnet-20241022",
+        max_tokens: 1000,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: promptText },
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: normalizedMimeType,
+                  data: base64Data,
                 },
-                { type: "text", text: promptText },
-              ],
-            },
-          ],
-        }),
+              },
+            ],
+          },
+        ],
+      };
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: reqHeaders,
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
-        const errorData = await response.json() as unknown;
-        throw new Error(`Anthropic API returned status ${response.status}: ${JSON.stringify(errorData)}`);
+        let errorMsg = `Anthropic-compatible API returned status ${response.status}`;
+        try {
+          const contentType = response.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            const errorData = await response.json();
+            errorMsg = `${provider.toUpperCase()} API returned status ${response.status}: ${JSON.stringify(errorData)}`;
+          } else {
+            const text = await response.text();
+            errorMsg = `${provider.toUpperCase()} API returned status ${response.status}: ${text.substring(0, 300)}`;
+          }
+        } catch {
+          // ignore
+        }
+        throw new Error(errorMsg);
       }
+
 
       const data = await response.json() as { content?: { text?: string }[] };
       const description = normalizeDescription(data.content?.[0]?.text?.trim() || "");
@@ -312,8 +402,20 @@ export async function POST(req: Request) {
       });
 
       if (!response.ok) {
-        const errorData = await response.json() as unknown;
-        throw new Error(`${provider.toUpperCase()} API returned status ${response.status}: ${JSON.stringify(errorData)}`);
+        let errorMsg = `${provider.toUpperCase()} API returned status ${response.status}`;
+        try {
+          const contentType = response.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            const errorData = await response.json();
+            errorMsg = `${provider.toUpperCase()} API returned status ${response.status}: ${JSON.stringify(errorData)}`;
+          } else {
+            const text = await response.text();
+            errorMsg = `${provider.toUpperCase()} API returned status ${response.status}: ${text.substring(0, 300)}`;
+          }
+        } catch {
+          // ignore
+        }
+        throw new Error(errorMsg);
       }
 
       const data = await response.json() as {

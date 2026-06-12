@@ -8,7 +8,7 @@ export interface TtsState {
   error: string | null;
 }
 
-interface VoiceParams {
+export interface VoiceParams {
   text: string;
   style?: string;
   voice?: string;
@@ -27,13 +27,18 @@ function getVoiceParams(textContent: string, modelId?: string, messageId?: strin
   let finalVoiceDesignPrompt: string | undefined = undefined;
 
   try {
-    let settings: any = null;
+    let settings: {
+      modelId?: string;
+      voiceDesignPrompt?: string;
+      voiceCloneAudioData?: string;
+      presetVoice?: string;
+    } | null = null;
     
     // 1. Try to load from history snapshot
     if (messageId) {
       const histStored = typeof window !== "undefined" ? localStorage.getItem("mimo_history_voice_settings") : null;
       if (histStored) {
-        const history = JSON.parse(histStored);
+        const history = JSON.parse(histStored) as Record<string, typeof settings>;
         settings = history[messageId];
       }
     }
@@ -76,11 +81,27 @@ function getVoiceParams(textContent: string, modelId?: string, messageId?: strin
   };
 }
 
+// Helper to hash voice if it is a DataURL to prevent giant URLs in Cache Storage
+function getNormalizedParams(params: VoiceParams): VoiceParams {
+  const normalized = { ...params };
+  if (normalized.voice && normalized.voice.startsWith("data:")) {
+    const dataUrl = normalized.voice;
+    let hash = 0;
+    for (let i = 0; i < dataUrl.length; i++) {
+      hash = (hash << 5) - hash + dataUrl.charCodeAt(i);
+      hash |= 0; // Convert to 32bit integer
+    }
+    normalized.voice = `data_url_hash_${dataUrl.length}_${hash}`;
+  }
+  return normalized;
+}
+
 // Retrieve from browser's persistent Cache Storage
 async function getCachedAudio(params: VoiceParams): Promise<string | null> {
   if (typeof window === "undefined" || !window.caches) return null;
   try {
-    const cacheKey = JSON.stringify(params);
+    const normalized = getNormalizedParams(params);
+    const cacheKey = JSON.stringify(normalized);
     const fakeUrl = `https://mimo.local/audio?key=${encodeURIComponent(cacheKey)}`;
     const cache = await caches.open("mimo-tts-cache");
     const cachedResponse = await cache.match(fakeUrl);
@@ -94,10 +115,11 @@ async function getCachedAudio(params: VoiceParams): Promise<string | null> {
 }
 
 // Save to browser's persistent Cache Storage
-async function saveCachedAudio(params: VoiceParams, audioUrl: string): Promise<void> {
+export async function saveCachedAudio(params: VoiceParams, audioUrl: string): Promise<void> {
   if (typeof window === "undefined" || !window.caches) return;
   try {
-    const cacheKey = JSON.stringify(params);
+    const normalized = getNormalizedParams(params);
+    const cacheKey = JSON.stringify(normalized);
     const fakeUrl = `https://mimo.local/audio?key=${encodeURIComponent(cacheKey)}`;
     const cache = await caches.open("mimo-tts-cache");
     await cache.put(fakeUrl, new Response(audioUrl));
@@ -154,6 +176,13 @@ export function useTts(messageId: string, textContent: string, modelId?: string,
       }
       globalActiveAudio = null;
     }
+    if (typeof window !== "undefined" && window.speechSynthesis && window.speechSynthesis.speaking) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch (e) {
+        console.error("Failed to cancel active SpeechSynthesis:", e);
+      }
+    }
     if (globalActiveSetState) {
       globalActiveSetState({ isPlaying: false, isLoading: false, error: null });
       globalActiveSetState = null;
@@ -171,6 +200,14 @@ export function useTts(messageId: string, textContent: string, modelId?: string,
     try {
       const activeModelId = incomingModelId || modelId;
       const params = getVoiceParams(textContent, activeModelId, messageId);
+      // Force TTS model: always use the TTS model from settings, not the chat model
+      try {
+        const stored = localStorage.getItem("mimo_voice_settings");
+        if (stored) {
+          const s = JSON.parse(stored);
+          if (s.modelId) params.modelId = s.modelId.toLowerCase();
+        }
+      } catch { /* ignore */ }
       if (style) params.style = style;
       if (voice) params.voice = voice;
 
@@ -224,23 +261,59 @@ export function useTts(messageId: string, textContent: string, modelId?: string,
 
       await audio.play();
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("[useTts] Speech synthesis error:", err);
-      setState({ isPlaying: false, isLoading: false, error: err.message || "语音合成出错" });
+      const errMsg = err instanceof Error ? err.message : String(err);
+
+      // Fallback: browser native SpeechSynthesis when MiMo TTS fails
+      if (typeof window !== "undefined" && window.speechSynthesis && textContent) {
+        console.log("[useTts] Falling back to browser SpeechSynthesis");
+        const utterance = new SpeechSynthesisUtterance(textContent);
+        utterance.lang = /[一-龥]/.test(textContent) ? "zh-CN" : "en-US";
+        utterance.rate = 1;
+        utterance.onstart = () => {
+          setState({ isPlaying: true, isLoading: false, error: null });
+        };
+        utterance.onend = () => {
+          setState({ isPlaying: false, isLoading: false, error: null });
+        };
+        utterance.onerror = () => {
+          setState({ isPlaying: false, isLoading: false, error: "Speech synthesis failed" });
+        };
+        window.speechSynthesis.speak(utterance);
+      } else {
+        setState({ isPlaying: false, isLoading: false, error: errMsg || "语音合成出错" });
+      }
       if (globalActiveSetState === setState) globalActiveSetState = null;
     }
   };
 
   const pause = () => {
+    let handled = false;
     if (globalActiveAudio && globalActiveSetState === setState) {
       try {
         globalActiveAudio.pause();
+        handled = true;
       } catch (e) {
         console.error("Pause error:", e);
       }
+    }
+    if (typeof window !== "undefined" && window.speechSynthesis && window.speechSynthesis.speaking) {
+      try {
+        window.speechSynthesis.cancel();
+        handled = true;
+      } catch (e) {
+        console.error("SpeechSynthesis cancel error:", e);
+      }
+    }
+    if (handled || globalActiveSetState === setState) {
       setState({ isPlaying: false, isLoading: false, error: null });
-      globalActiveAudio = null;
-      globalActiveSetState = null;
+      if (globalActiveAudio && globalActiveSetState === setState) {
+        globalActiveAudio = null;
+      }
+      if (globalActiveSetState === setState) {
+        globalActiveSetState = null;
+      }
     }
   };
 

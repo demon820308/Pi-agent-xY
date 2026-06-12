@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { isBaseTtsModel, isVoiceDesignModel, isVoiceCloneModel, isTtsModel } from "@/lib/tts-utils";
+import { encodeFilePathForApi } from "@/lib/file-paths";
 
 export interface TtsPanelProps {
   model: { provider: string; modelId: string } | null | undefined;
@@ -9,6 +10,7 @@ export interface TtsPanelProps {
   voiceConsoleOpen: boolean;
   setVoiceConsoleOpen: (open: boolean) => void;
   insertAudioTag: (tag: string) => void;
+  cwd?: string | null;
 }
 
 export function TtsPanel({
@@ -17,6 +19,7 @@ export function TtsPanel({
   voiceConsoleOpen,
   setVoiceConsoleOpen,
   insertAudioTag,
+  cwd,
 }: TtsPanelProps) {
   const isTts = model ? isTtsModel(model.provider, model.modelId) : false;
 
@@ -43,6 +46,23 @@ export function TtsPanel({
         if (settings.voiceCloneAudioData) setVoiceCloneAudioData(settings.voiceCloneAudioData);
       }
       
+      // Clear bloated Base64 DataURLs from historical snapshots to resolve QuotaExceededError
+      const histStored = localStorage.getItem("mimo_history_voice_settings");
+      if (histStored) {
+        const history = JSON.parse(histStored);
+        let cleaned = false;
+        for (const key of Object.keys(history)) {
+          if (history[key] && history[key].voiceCloneAudioData && String(history[key].voiceCloneAudioData).startsWith("data:")) {
+            delete history[key].voiceCloneAudioData;
+            cleaned = true;
+          }
+        }
+        if (cleaned) {
+          localStorage.setItem("mimo_history_voice_settings", JSON.stringify(history));
+          console.log("[TtsPanel] Purged large Base64 audio data from historical voice snapshots to prevent localStorage quota crash.");
+        }
+      }
+
       const libStored = localStorage.getItem("mimo_voice_design_library");
       if (libStored) {
         setVoiceDesignLibrary(JSON.parse(libStored));
@@ -118,21 +138,29 @@ export function TtsPanel({
     }
   };
 
-  const selectFileForCloning = (file: File, fileName: string) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      if (e.target?.result && typeof e.target.result === "string") {
-        let result = e.target.result;
-        // If it is recorded webm audio, trans-label the base64 prefix to audio/wav 
-        // to bypass strict Xiaomi voice clone format restrictions.
-        if (result.startsWith("data:audio/webm;")) {
-          result = result.replace("data:audio/webm;", "data:audio/wav;");
-        }
-        setVoiceCloneAudioData(result);
-        setVoiceCloneActiveFile(fileName);
+  const selectFileForCloning = async (file: File, fileName: string) => {
+    if (!cwd) {
+      alert("无法获取当前工作区路径，上传声线克隆源文件失败！");
+      return;
+    }
+    try {
+      const destPath = `${cwd.replace(/\\/g, "/").replace(/\/$/, "")}/Temp/${fileName}`;
+      const encoded = encodeFilePathForApi(destPath);
+      const res = await fetch(`/api/files/${encoded}`, {
+        method: "POST",
+        body: file,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `上传文件 ${fileName} 失败`);
       }
-    };
-    reader.readAsDataURL(file);
+      setVoiceCloneAudioData(destPath);
+      setVoiceCloneActiveFile(fileName);
+    } catch (err: unknown) {
+      console.error("Failed to upload clone file immediately:", err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      alert(errMsg || "上传克隆音频文件到工作区失败，请重试");
+    }
   };
 
   if (!isTts) return null;

@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { cleanSpeechText } from "@/lib/tts-utils";
+import fs from "fs";
+import path from "path";
+import { resolveSessionPath } from "@/lib/session-reader";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +25,8 @@ export async function POST(req: Request) {
       voice?: string;
       modelId?: string;
       voiceDesignPrompt?: string;
+      cwd?: string;
+      sessionId?: string;
     };
 
     text = cleanSpeechText(body.text);
@@ -30,7 +35,8 @@ export async function POST(req: Request) {
     if (typeof body.modelId !== "undefined") modelId = body.modelId;
     voiceDesignPrompt = body.voiceDesignPrompt;
 
-    finalModelId = modelId;
+    // Normalize model ID to lowercase for MiMo API compatibility
+    finalModelId = modelId.toLowerCase();
     finalVoice = voice;
 
     if (!text) {
@@ -41,11 +47,12 @@ export async function POST(req: Request) {
     const authStorage = AuthStorage.create();
     const registry = ModelRegistry.create(authStorage);
     
-    let apiKey = "";
-    let baseUrl = "https://token-plan-cn.xiaomimimo.com/v1";
+    apiKey = "";
+    baseUrl = "https://token-plan-cn.xiaomimimo.com/v1";
 
     const availableModels = registry.getAvailable();
-    const model = availableModels.find(m => m.id === modelId) || registry.getAll().find(m => m.id === modelId);
+    const modelIdLower = modelId.toLowerCase();
+    const model = availableModels.find(m => m.id.toLowerCase() === modelIdLower) || registry.getAll().find(m => m.id.toLowerCase() === modelIdLower);
 
     if (model) {
       const auth = await registry.getApiKeyAndHeaders(model);
@@ -89,31 +96,47 @@ export async function POST(req: Request) {
     // - User role: provides instructions for style, emotion, tone, or dialect
     // - Assistant role: provides the actual text to be synthesized into speech
     
-    const isDesign = modelId.toLowerCase().includes("voicedesign") || modelId.toLowerCase().includes("design");
     const isClone = modelId.toLowerCase().includes("voiceclone") || modelId.toLowerCase().includes("clone");
 
-    finalModelId = modelId;
+    // Normalize model ID to lowercase for MiMo API compatibility
+    finalModelId = modelId.toLowerCase();
     finalVoice = voice;
 
     // Handle voice clone model fallback when reference audio is not a DataURL
     if (isClone) {
-      const isVoiceDataUrl = voice && voice.startsWith("data:");
+      let isVoiceDataUrl = voice && voice.startsWith("data:");
+
+      // If it's a file path on the server, read it and convert to DataURL
+      if (!isVoiceDataUrl && voice) {
+        try {
+          const fs = await import("fs");
+          const path = await import("path");
+          if (fs.existsSync(voice) && fs.statSync(voice).isFile()) {
+            const buffer = fs.readFileSync(voice);
+            const ext = path.extname(voice).toLowerCase().replace(".", "");
+            const mimeType = ext === "mp3" ? "audio/mp3" : "audio/wav";
+            voice = `data:${mimeType};base64,${buffer.toString("base64")}`;
+            isVoiceDataUrl = true;
+            console.log(`[tts-synthesize] Resolved voice clone file path successfully: ${voice.substring(0, 80)}...`);
+          }
+        } catch (err) {
+          console.error("[tts-synthesize] Failed to load voice clone file from path:", voice, err);
+        }
+      }
+
       if (!isVoiceDataUrl) {
-        console.log(`[tts-synthesize] Voice clone selected but voice parameter is not a DataURL. Falling back to standard mimo-v2.5-tts.`);
+        console.log(`[tts-synthesize] Voice clone selected but voice parameter is not a DataURL or valid file path. Falling back to standard mimo-v2.5-tts.`);
         finalModelId = "mimo-v2.5-tts";
         finalVoice = "mimo_default";
       } else {
         // Automatically translate unsupported but common browser formats (like webm, ogg, m4a)
         // by trans-labeling their DataURL prefix to audio/wav.
         // This leverages the backend decoder's ability to decode multi-format streams.
-        if (
-          voice.startsWith("data:audio/webm;") || 
-          voice.startsWith("data:audio/ogg;") || 
-          voice.startsWith("data:audio/m4a;") || 
-          voice.startsWith("data:audio/webm,")
-        ) {
-          console.log(`[tts-synthesize] Translating unsupported browser audio format to wav header for MiMo compatibility.`);
+        if (voice.startsWith("data:audio/") && !voice.startsWith("data:audio/wav;")) {
+          console.log(`[tts-synthesize] Translating unsupported browser audio format ${voice.substring(0, 30)} to wav header for MiMo compatibility.`);
           finalVoice = voice.replace(/^data:audio\/[^;]+;/, "data:audio/wav;");
+        } else {
+          finalVoice = voice;
         }
       }
     }
@@ -131,7 +154,14 @@ export async function POST(req: Request) {
         : "speak naturally in a warm conversational tone.";
     }
 
-    const requestBody: Record<string, any> = {
+    const requestBody: {
+      model: string;
+      messages: { role: string; content: string }[];
+      audio: {
+        format: string;
+        voice?: string;
+      };
+    } = {
       model: finalModelId,
       messages: [
         {
@@ -143,11 +173,13 @@ export async function POST(req: Request) {
           content: text
         }
       ],
-      audio: {}
+      audio: {
+        format: "mp3"
+      }
     };
 
     // For voice design, we MUST NOT supply audio.voice parameter as it causes HTTP 400 Param Incorrect
-    if (!finalIsDesign) {
+    if (!finalIsDesign && finalVoice) {
       requestBody.audio.voice = finalVoice;
     }
 
@@ -165,18 +197,34 @@ export async function POST(req: Request) {
     });
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
+      const responseText = await response.text();
+      let errorData: {
+        error?: string | {
+          message?: string;
+          param?: string;
+        };
+      } = {};
+      try {
+        errorData = JSON.parse(responseText);
+      } catch {
+        errorData = { error: responseText };
+      }
       console.error("[tts-synthesize] Xiaomi API error response:", JSON.stringify(errorData));
       
-      const errorMsg = errorData.error?.message || errorData.error || JSON.stringify(errorData);
-      const errorParam = errorData.error?.param ? ` (参数错误字段: ${errorData.error.param})` : "";
+      const errorMsg = typeof errorData.error === "object"
+        ? errorData.error?.message
+        : errorData.error || JSON.stringify(errorData);
+      const errorParam = typeof errorData.error === "object" && errorData.error?.param
+        ? ` (参数错误字段: ${errorData.error.param})`
+        : "";
       
       return NextResponse.json({
         error: `Xiaomi TTS API 返回错误 (HTTP ${response.status}): ${errorMsg}${errorParam}`
       }, { status: response.status });
     }
 
-    const data = await response.json() as {
+    const responseText = await response.text();
+    let data: {
       choices?: {
         message?: {
           audio?: {
@@ -185,6 +233,14 @@ export async function POST(req: Request) {
         };
       }[];
     };
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      console.error("[tts-synthesize] Failed to parse JSON response:", responseText);
+      return NextResponse.json({
+        error: `Xiaomi TTS API 返回了非 JSON 格式的响应: ${responseText.substring(0, 500)}`
+      }, { status: 500 });
+    }
 
     const audioData = data.choices?.[0]?.message?.audio?.data;
     if (!audioData) {
@@ -194,15 +250,93 @@ export async function POST(req: Request) {
       }, { status: 500 });
     }
 
-    // 3. Return base64 audio data URL directly
+    // 3. Save to Temp and return local file URL if cwd is provided
+    if (body.cwd) {
+      try {
+        const tempDir = path.join(body.cwd, "Temp");
+        if (!fs.existsSync(tempDir)) {
+          fs.mkdirSync(tempDir, { recursive: true });
+          fs.writeFileSync(path.join(tempDir, ".gitignore"), "*\n");
+        }
+        
+        const fileName = `tts_${Date.now()}.mp3`;
+        const filePath = path.join(tempDir, fileName);
+        fs.writeFileSync(filePath, Buffer.from(audioData, "base64"));
+        console.log(`[tts-synthesize] Saved audio to workspace Temp: ${filePath}`);
+
+        const duration = Math.max(1, Math.round(text.length / 3.5));
+        
+        // Try linking to session if sessionId is provided
+        if (body.sessionId) {
+          const sessionFile = await resolveSessionPath(body.sessionId);
+          if (sessionFile && fs.existsSync(sessionFile)) {
+            try {
+              const fileContent = fs.readFileSync(sessionFile, "utf-8");
+              const lines = fileContent.split("\n");
+              let assistantLineIdx = -1;
+              for (let i = lines.length - 1; i >= 0; i--) {
+                const line = lines[i].trim();
+                if (!line) continue;
+                try {
+                  const parsed = JSON.parse(line);
+                  if (parsed.type === "message" && parsed.message?.role === "assistant") {
+                    assistantLineIdx = i;
+                    break;
+                  }
+                } catch {}
+              }
+
+              if (assistantLineIdx !== -1) {
+                const entry = JSON.parse(lines[assistantLineIdx]);
+                const attachmentText = `\n\n<!-- PI_FILE_ATTACHMENTS_START -->\n- Temp/${fileName} (${duration}s)\n<!-- PI_FILE_ATTACHMENTS_END -->`;
+                
+                if (typeof entry.message.content === "string") {
+                  entry.message.content += attachmentText;
+                } else if (Array.isArray(entry.message.content)) {
+                  const lastTextBlock = entry.message.content.findLast((b: any) => b.type === "text");
+                  if (lastTextBlock) {
+                    lastTextBlock.text += attachmentText;
+                  } else {
+                    entry.message.content.push({ type: "text", text: attachmentText });
+                  }
+                }
+                
+                lines[assistantLineIdx] = JSON.stringify(entry);
+                fs.writeFileSync(sessionFile, lines.join("\n"), "utf-8");
+                console.log(`[tts-synthesize] Linked audio attachment to session file: ${sessionFile}`);
+              }
+            } catch (err) {
+              console.error("[tts-synthesize] Failed to append attachment to session file:", err);
+            }
+          }
+        }
+
+        const normalizedPath = filePath.replace(/\\/g, "/");
+        const encodedPath = normalizedPath
+          .split("/")
+          .filter(Boolean)
+          .map(encodeURIComponent)
+          .join("/");
+        const localUrl = `/api/files/${encodedPath}?type=read`;
+
+        return NextResponse.json({
+          audioUrl: localUrl
+        });
+      } catch (err) {
+        console.error("[tts-synthesize] Failed to save TTS audio to local disk, falling back to base64:", err);
+      }
+    }
+
+    // Fallback: Return base64 audio data URL directly
     return NextResponse.json({
       audioUrl: `data:audio/mp3;base64,${audioData}`
     });
 
-  } catch (error: any) {
-    console.error("[tts-synthesize] Unexpected error:", error);
+  } catch (error: unknown) {
+    const err = error as Error & { cause?: unknown };
+    console.error("[tts-synthesize] Unexpected error:", err);
     return NextResponse.json({ 
-      error: `TTS 接口出错: ${String(error)}`,
+      error: `TTS 接口出错: ${String(err)}`,
       debug: {
         modelId,
         finalModelId: typeof finalModelId !== "undefined" ? finalModelId : undefined,
@@ -212,8 +346,8 @@ export async function POST(req: Request) {
         endpoint: typeof baseUrl !== "undefined" ? `${baseUrl}/chat/completions` : undefined,
         hasApiKey: typeof apiKey !== "undefined" ? !!apiKey : false,
         apiKeyPrefix: typeof apiKey !== "undefined" && apiKey ? apiKey.substring(0, 10) : undefined,
-        errorStack: error?.stack || String(error),
-        errorCause: error?.cause ? String(error.cause) : (error?.message || String(error))
+        errorStack: err?.stack || String(err),
+        errorCause: err?.cause ? String(err.cause) : (err?.message || String(err))
       }
     }, { status: 500 });
   }

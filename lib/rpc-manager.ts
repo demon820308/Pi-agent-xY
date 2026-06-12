@@ -374,7 +374,8 @@ export async function startRpcSession(
   sessionFile: string,
   cwd: string,
   toolNames?: string[],
-  customSystemPrompt?: string
+  customSystemPrompt?: string,
+  gemInfo?: { gemId: string; gemName: string; gemAvatar: string }
 ): Promise<{ session: AgentSessionWrapper; realSessionId: string }> {
   const registry = getRegistry();
   const locks = getLocks();
@@ -392,6 +393,10 @@ export async function startRpcSession(
     const sessionManager = sessionFile
       ? SessionManager.open(sessionFile, undefined)
       : SessionManager.create(cwd, undefined);
+
+    // We will force-flush the session header after createAgentSession is fully initialized,
+    // which prevents duplicate session header writes.
+
 
     // Determine which tools to pass based on requested toolNames.
     // Since v0.68.0, createAgentSession expects string[] tool names instead of Tool[] instances.
@@ -463,8 +468,8 @@ export async function startRpcSession(
       }
     }
 
-    // If specific tool names were requested (non-empty), narrow active tools now
-    if (toolNames && toolNames.length > 0) {
+    // If specific tool names were requested, narrow active tools now
+    if (toolNames) {
       inner.setActiveToolsByName(toolNames);
     }
 
@@ -540,9 +545,60 @@ export async function startRpcSession(
     wrapper.start();
     injectSystemGuidelines(inner);
 
+    // For new sessions, deduplicate any double session headers in fileEntries,
+    // then force-flush to ensure the file is written immediately (fixes cold-start fallback).
+    if (!sessionFile) {
+      const sm = (inner as any).sessionManager;
+      if (sm && typeof sm._rewriteFile === "function") {
+        try {
+          if (Array.isArray(sm.fileEntries)) {
+            const firstSessionIdx = sm.fileEntries.findIndex((e: any) => e.type === "session");
+            if (firstSessionIdx !== -1) {
+              sm.fileEntries = sm.fileEntries.filter((e: any, idx: number) => {
+                return e.type !== "session" || idx === firstSessionIdx;
+              });
+            }
+          }
+          sm._rewriteFile();
+          sm.flushed = true;
+          console.log(`[rpc-manager] Force-flushed deduplicated session header to: ${sm.sessionFile}`);
+        } catch (err) {
+          console.error("[rpc-manager] Failed to force-flush session header:", err);
+        }
+      }
+    }
+
     const realSessionId = inner.sessionId as string;
     const realSessionFile = inner.sessionFile as string | undefined;
     if (realSessionFile) cacheSessionPath(realSessionId, realSessionFile);
+
+    // Write gem_info entry if this session uses a Gem-xY agent
+    if (gemInfo) {
+      try {
+        const gemEntry = {
+          type: "gem_info",
+          id: `gem_${Date.now()}`,
+          parentId: null,
+          timestamp: new Date().toISOString(),
+          gemId: gemInfo.gemId,
+          gemName: gemInfo.gemName,
+          gemAvatar: gemInfo.gemAvatar,
+        };
+        const sm = (inner as any).sessionManager;
+        if (sm) {
+          sm.fileEntries.push(gemEntry);
+          sm.byId.set(gemEntry.id, gemEntry);
+          // If the session is already flushed, append it. Otherwise, let SessionManager's own flush mechanism handle it.
+          if (sm.flushed && realSessionFile) {
+            const { appendFileSync } = await import("fs");
+            appendFileSync(realSessionFile, JSON.stringify(gemEntry) + "\n");
+          }
+          console.log(`[rpc-manager] Registered gem_info entry in SessionManager for session ${realSessionId}`);
+        }
+      } catch (e) {
+        console.error("[rpc-manager] Failed to write gem_info entry:", e);
+      }
+    }
 
     wrapper.onDestroy(() => registry.delete(realSessionId));
     registry.set(realSessionId, wrapper);

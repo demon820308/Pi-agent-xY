@@ -3,6 +3,8 @@ import type { SessionEntry, SessionInfo, SessionContext, SessionTreeNode, Assist
 import type { SessionEntry as PiSessionEntry, SessionInfo as PiSessionInfo } from "@earendil-works/pi-coding-agent";
 import { normalizeToolCalls } from "./normalize";
 import { getLockedSessionIds } from "./session-lock";
+import { readFileSync, readdirSync, statSync } from "fs";
+import { join } from "path";
 
 export { getAgentDir };
 
@@ -10,30 +12,149 @@ export function getSessionsDir(): string {
   return `${getAgentDir()}/sessions`;
 }
 
-export async function listAllSessions(): Promise<SessionInfo[]> {
-  const piSessions: PiSessionInfo[] = await SessionManager.listAll();
-  const pathToId = new Map<string, string>();
-  for (const s of piSessions) pathToId.set(s.path, s.id);
+/**
+ * Read gem_info entry from a session file (first 20 lines only for performance).
+ * Returns gemId, gemName, gemAvatar if found.
+ */
+function readGemInfoFromFile(filePath: string): { gemId?: string; gemName?: string; gemAvatar?: string } {
+  try {
+    const content = readFileSync(filePath, "utf-8");
+    const lines = content.split("\n").slice(0, 20); // Only check first 20 lines
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const entry = JSON.parse(line);
+        if (entry.type === "gem_info" && entry.gemId) {
+          return {
+            gemId: entry.gemId,
+            gemName: entry.gemName,
+            gemAvatar: entry.gemAvatar,
+          };
+        }
+      } catch {
+        // Skip malformed lines
+      }
+    }
+  } catch {
+    // File read error - ignore
+  }
+  return {};
+}
 
-  const lockedIds = new Set(getLockedSessionIds());
+export async function listAllSessions(): Promise<SessionInfo[]> {
+  const sessionsDir = getSessionsDir();
+  const allSessions: SessionInfo[] = [];
+
+  // Scan all subdirectories under sessions/ and read session files directly
+  try {
+    const entries = readdirSync(sessionsDir);
+    for (const entry of entries) {
+      const fullPath = join(sessionsDir, entry);
+      try {
+        const stat = statSync(fullPath);
+        if (stat.isDirectory()) {
+          // Scan .jsonl files in this directory
+          const files = readdirSync(fullPath).filter((f) => f.endsWith(".jsonl"));
+          for (const file of files) {
+            const filePath = join(fullPath, file);
+            try {
+              const content = readFileSync(filePath, "utf-8");
+              const firstLine = content.split("\n")[0];
+              if (!firstLine) continue;
+
+              const header = JSON.parse(firstLine);
+              if (header.type !== "session") continue;
+
+              // Read gem info from first 20 lines
+              const gemInfo = readGemInfoFromFile(filePath);
+
+              // Extract first user message for display
+              const lines = content.split("\n");
+              let firstMessage = "";
+              let messageCount = 0;
+              for (const line of lines.slice(0, 50)) {
+                try {
+                  const entry = JSON.parse(line);
+                  if (entry.type === "message" && entry.message?.role === "user") {
+                    const c = entry.message.content;
+                    firstMessage = typeof c === "string" ? c : (Array.isArray(c) ? (c.find((b: { type: string }) => b.type === "text") as { text: string } | undefined)?.text ?? "" : "");
+                    break;
+                  }
+                  if (entry.type === "message") messageCount++;
+                } catch {
+                  // Skip malformed lines
+                }
+              }
+
+              allSessions.push({
+                path: filePath,
+                id: header.id,
+                cwd: header.cwd || "",
+                name: undefined, // Will be read from session_info entries if needed
+                created: header.timestamp || new Date().toISOString(),
+                modified: stat.mtime.toISOString(),
+                messageCount,
+                firstMessage: firstMessage || "(no messages)",
+                parentSessionId: header.parentSession ? undefined : undefined, // Will be resolved later
+                locked: false,
+                ...gemInfo,
+              });
+            } catch {
+              // Skip invalid session files
+            }
+          }
+        }
+      } catch {
+        // Skip invalid directories
+      }
+    }
+  } catch {
+    // Fallback: use default listAll() which only returns current cwd sessions
+    const defaultSessions = await SessionManager.listAll();
+    const pathToId = new Map<string, string>();
+    for (const s of defaultSessions) pathToId.set(s.path, s.id);
+
+    const lockedIds = new Set(getLockedSessionIds());
+
+    for (const s of defaultSessions) {
+      const gemInfo = readGemInfoFromFile(s.path);
+      allSessions.push({
+        path: s.path,
+        id: s.id,
+        cwd: s.cwd,
+        name: s.name,
+        created: s.created instanceof Date ? s.created.toISOString() : String(s.created),
+        modified: s.modified instanceof Date ? s.modified.toISOString() : String(s.modified),
+        messageCount: s.messageCount,
+        firstMessage: s.firstMessage || "(no messages)",
+        parentSessionId: s.parentSessionPath ? pathToId.get(s.parentSessionPath) : undefined,
+        locked: lockedIds.has(s.id),
+        ...gemInfo,
+      });
+    }
+  }
+
+  // Deduplicate by id (in case same session appears in multiple scans)
+  const seen = new Set<string>();
+  const uniqueSessions = allSessions.filter((s) => {
+    if (seen.has(s.id)) return false;
+    seen.add(s.id);
+    return true;
+  });
+
+  // Sort by modified date (newest first), tie-break by created date (newest first)
+  uniqueSessions.sort((a, b) => {
+    const diff = new Date(b.modified).getTime() - new Date(a.modified).getTime();
+    if (diff !== 0) return diff;
+    return new Date(b.created).getTime() - new Date(a.created).getTime();
+  });
 
   const cache = getPathCache();
-  return piSessions.map((s) => {
-    // Populate path cache so resolveSessionPath works without a full scan
+  for (const s of uniqueSessions) {
     cache.set(s.id, s.path);
-    return {
-      path: s.path,
-      id: s.id,
-      cwd: s.cwd,
-      name: s.name,
-      created: s.created instanceof Date ? s.created.toISOString() : String(s.created),
-      modified: s.modified instanceof Date ? s.modified.toISOString() : String(s.modified),
-      messageCount: s.messageCount,
-      firstMessage: s.firstMessage || "(no messages)",
-      parentSessionId: s.parentSessionPath ? pathToId.get(s.parentSessionPath) : undefined,
-      locked: lockedIds.has(s.id),
-    };
-  });
+  }
+
+  return uniqueSessions;
 }
 
 // ============================================================================

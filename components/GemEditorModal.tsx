@@ -36,6 +36,7 @@ export default function GemEditorModal({ isOpen, onClose, gemId, onSave, modelLi
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isPreset, setIsPreset] = useState(false);
 
   // Load Gem-xY profile for editing if gemId is provided
   useEffect(() => {
@@ -58,6 +59,7 @@ export default function GemEditorModal({ isOpen, onClose, gemId, onSave, modelLi
             setSystemPrompt(gem.systemPrompt);
             setAllowedTools(gem.allowedTools || []);
             setKnowledgeFiles(gem.knowledgeFiles || []);
+            setIsPreset(gem.name === "Gem-xY 文案助手");
             if (gem.provider && gem.modelId) {
               setSelectedModelKey(`${gem.provider}/${gem.modelId}`);
             } else {
@@ -79,6 +81,7 @@ export default function GemEditorModal({ isOpen, onClose, gemId, onSave, modelLi
       setSystemPrompt("");
       setAllowedTools(ALL_AVAILABLE_TOOLS.map((t) => t.name)); // Enabled all by default
       setKnowledgeFiles([]);
+      setIsPreset(false);
       if (defaultModel) {
         setSelectedModelKey(`${defaultModel.provider}/${defaultModel.modelId}`);
       } else {
@@ -112,6 +115,14 @@ export default function GemEditorModal({ isOpen, onClose, gemId, onSave, modelLi
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isPreset) {
+      setError("不能修改预置的 \"Gem-xY 文案助手\" 智能体");
+      return;
+    }
+    if (name.trim() === "Gem-xY 文案助手") {
+      setError("不能使用预置名称 \"Gem-xY 文案助手\"");
+      return;
+    }
     if (!name.trim()) {
       setError("名称不能为空");
       return;
@@ -256,6 +267,25 @@ export default function GemEditorModal({ isOpen, onClose, gemId, onSave, modelLi
             </div>
           )}
 
+          {isPreset && (
+            <div
+              style={{
+                padding: "8px 12px",
+                background: "rgba(234, 179, 8, 0.12)",
+                border: "1px solid rgba(234, 179, 8, 0.3)",
+                color: "var(--text)",
+                borderRadius: 6,
+                fontSize: 12,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <span style={{ fontSize: 16 }}>⚠️</span>
+              <span><strong>提示:</strong> &quot;Gem-xY 文案助手&quot; 是系统预置智能体，禁止修改或删除。</span>
+            </div>
+          )}
+
           {loading && !gemId ? (
             <div style={{ padding: 20, textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
               保存中...
@@ -295,6 +325,7 @@ export default function GemEditorModal({ isOpen, onClose, gemId, onSave, modelLi
                       <button
                         key={emoji}
                         type="button"
+                        disabled={isPreset}
                         onClick={() => setAvatar(emoji)}
                         style={{
                           width: 28,
@@ -302,7 +333,7 @@ export default function GemEditorModal({ isOpen, onClose, gemId, onSave, modelLi
                           borderRadius: 4,
                           border: avatar === emoji ? "1px solid var(--accent)" : "1px solid transparent",
                           background: avatar === emoji ? "var(--bg-selected)" : "transparent",
-                          cursor: "pointer",
+                          cursor: isPreset ? "not-allowed" : "pointer",
                           fontSize: 14,
                           display: "flex",
                           alignItems: "center",
@@ -325,17 +356,19 @@ export default function GemEditorModal({ isOpen, onClose, gemId, onSave, modelLi
                 <input
                   type="text"
                   required
+                  disabled={isPreset}
                   placeholder="例如: Code Analyzer, 英语翻译官"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   style={{
                     padding: "8px 12px",
-                    background: "var(--bg)",
+                    background: isPreset ? "var(--bg-panel)" : "var(--bg)",
                     border: "1px solid var(--border)",
                     borderRadius: 6,
                     color: "var(--text)",
                     fontSize: 12,
                     outline: "none",
+                    cursor: isPreset ? "not-allowed" : "text",
                   }}
                 />
               </div>
@@ -347,17 +380,19 @@ export default function GemEditorModal({ isOpen, onClose, gemId, onSave, modelLi
                 </label>
                 <input
                   type="text"
+                  disabled={isPreset}
                   placeholder="用一句话描述它的专业领域"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   style={{
                     padding: "8px 12px",
-                    background: "var(--bg)",
+                    background: isPreset ? "var(--bg-panel)" : "var(--bg)",
                     border: "1px solid var(--border)",
                     borderRadius: 6,
                     color: "var(--text)",
                     fontSize: 12,
                     outline: "none",
+                    cursor: isPreset ? "not-allowed" : "text",
                   }}
                 />
               </div>
@@ -369,20 +404,22 @@ export default function GemEditorModal({ isOpen, onClose, gemId, onSave, modelLi
                 </label>
                 <textarea
                   required
+                  disabled={isPreset}
                   rows={6}
                   placeholder="详细定义智能体的角色、口吻、回复格式以及所需遵循的准则。比如: '你是一个专业的 React 专家，使用简洁的代码逻辑进行回答。'"
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
                   style={{
                     padding: "8px 12px",
-                    background: "var(--bg)",
+                    background: isPreset ? "var(--bg-panel)" : "var(--bg)",
                     border: "1px solid var(--border)",
                     borderRadius: 6,
                     color: "var(--text)",
                     fontSize: 12,
                     outline: "none",
                     fontFamily: "inherit",
-                    resize: "vertical",
+                    resize: isPreset ? "none" : "vertical",
+                    cursor: isPreset ? "not-allowed" : "auto",
                   }}
                 />
               </div>
@@ -393,16 +430,18 @@ export default function GemEditorModal({ isOpen, onClose, gemId, onSave, modelLi
                   底层模型 (可选)
                 </label>
                 <select
+                  disabled={isPreset}
                   value={selectedModelKey}
                   onChange={(e) => setSelectedModelKey(e.target.value)}
                   style={{
                     padding: "8px 12px",
-                    background: "var(--bg)",
+                    background: isPreset ? "var(--bg-panel)" : "var(--bg)",
                     border: "1px solid var(--border)",
                     borderRadius: 6,
                     color: "var(--text)",
                     fontSize: 12,
                     outline: "none",
+                    cursor: isPreset ? "not-allowed" : "pointer",
                   }}
                 >
                   <option value="">— 沿用全局默认模型 —</option>
@@ -439,18 +478,19 @@ export default function GemEditorModal({ isOpen, onClose, gemId, onSave, modelLi
                         gap: 8,
                         fontSize: 11,
                         color: "var(--text-muted)",
-                        cursor: "pointer",
+                        cursor: isPreset ? "not-allowed" : "pointer",
                       }}
                     >
                       <input
                         type="checkbox"
+                        disabled={isPreset}
                         checked={allowedTools.includes(t.name)}
                         onChange={() => handleToolToggle(t.name)}
                         style={{
                           width: 14,
                           height: 14,
                           accentColor: "var(--accent)",
-                          cursor: "pointer",
+                          cursor: isPreset ? "not-allowed" : "pointer",
                         }}
                       />
                       <div>
@@ -501,12 +541,13 @@ export default function GemEditorModal({ isOpen, onClose, gemId, onSave, modelLi
                         </span>
                         <button
                           type="button"
+                          disabled={isPreset}
                           onClick={() => removeKnowledgeFile(idx)}
                           style={{
                             background: "none",
                             border: "none",
-                            color: "#ef4444",
-                            cursor: "pointer",
+                            color: isPreset ? "var(--text-dim)" : "#ef4444",
+                            cursor: isPreset ? "not-allowed" : "pointer",
                             padding: "0 4px",
                           }}
                         >
@@ -520,31 +561,34 @@ export default function GemEditorModal({ isOpen, onClose, gemId, onSave, modelLi
                 <div style={{ display: "flex", gap: 8 }}>
                   <input
                     type="text"
+                    disabled={isPreset}
                     placeholder="输入宿主机上文件的绝对路径 (如 D:/rules.md)"
                     value={newFilePath}
                     onChange={(e) => setNewFilePath(e.target.value)}
                     style={{
                       flex: 1,
                       padding: "8px 12px",
-                      background: "var(--bg)",
+                      background: isPreset ? "var(--bg-panel)" : "var(--bg)",
                       border: "1px solid var(--border)",
                       borderRadius: 6,
                       color: "var(--text)",
                       fontSize: 12,
                       outline: "none",
+                      cursor: isPreset ? "not-allowed" : "text",
                     }}
                   />
                   <button
                     type="button"
+                    disabled={isPreset}
                     onClick={addKnowledgeFile}
                     style={{
                       padding: "0 14px",
                       background: "var(--bg-hover)",
                       border: "1px solid var(--border)",
                       borderRadius: 6,
-                      color: "var(--text)",
+                      color: isPreset ? "var(--text-dim)" : "var(--text)",
                       fontSize: 12,
-                      cursor: "pointer",
+                      cursor: isPreset ? "not-allowed" : "pointer",
                     }}
                   >
                     添加
@@ -582,25 +626,25 @@ export default function GemEditorModal({ isOpen, onClose, gemId, onSave, modelLi
               cursor: "pointer",
             }}
           >
-            取消
+            {isPreset ? "关闭" : "取消"}
           </button>
           <button
             type="button"
-            disabled={loading}
+            disabled={loading || isPreset}
             onClick={handleSubmit}
             style={{
               padding: "6px 18px",
-              background: "var(--accent)",
-              border: "none",
+              background: isPreset ? "var(--bg-hover)" : "var(--accent)",
+              border: isPreset ? "1px solid var(--border)" : "none",
               borderRadius: 6,
-              color: "#fff",
+              color: isPreset ? "var(--text-dim)" : "#fff",
               fontSize: 12,
               fontWeight: 600,
-              cursor: loading ? "not-allowed" : "pointer",
+              cursor: loading || isPreset ? "not-allowed" : "pointer",
               opacity: loading ? 0.7 : 1,
             }}
           >
-            {loading ? "保存中..." : "保存智能体"}
+            {isPreset ? "只读预置智能体" : (loading ? "保存中..." : "保存智能体")}
           </button>
         </div>
       </div>
