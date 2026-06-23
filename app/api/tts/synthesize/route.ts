@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { AuthStorage, ModelRegistry, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { cleanSpeechText } from "@/lib/tts-utils";
 import fs from "fs";
 import path from "path";
@@ -43,46 +43,158 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Text is required for speech synthesis" }, { status: 400 });
     }
 
+    const isLocalModel = modelId.toLowerCase().includes("-local-tts-");
+    let isLocalServerRunning = false;
+
+    if (isLocalModel) {
+      const midLower = modelId.toLowerCase();
+      let localKey = "";
+      let scriptName = "";
+      
+      if (midLower.includes("voxcpm")) {
+        localKey = "VOXCPM2";
+        scriptName = "voxcpm_server.py";
+      } else if (midLower.includes("cosyvoice")) {
+        localKey = "COSYVOICE";
+        scriptName = "cosyvoice_server.py";
+      } else if (midLower.includes("gptsovits")) {
+        localKey = "GPT-SOVITS";
+        scriptName = "gpt_sovits_server.py";
+      }
+      
+      if (localKey) {
+        const agentDir = getAgentDir();
+        const modelPath = path.join(agentDir, "local-models", localKey);
+        const scriptPath = path.join(process.cwd(), "scripts", scriptName);
+        
+        // Check if server is already running on port 9880
+        isLocalServerRunning = await new Promise<boolean>((resolve) => {
+          const client = require("http").request({
+            host: "127.0.0.1",
+            port: 9880,
+            path: "/v1/chat/completions",
+            method: "OPTIONS",
+            timeout: 400
+          }, () => {
+            resolve(true);
+          });
+          client.on("error", () => resolve(false));
+          client.on("timeout", () => resolve(false));
+          client.end();
+        });
+        
+        if (!isLocalServerRunning) {
+          // Terminate any running local servers first to avoid port conflicts
+          const localProcesses = (globalThis as any).__localTtsProcesses || new Map();
+          (globalThis as any).__localTtsProcesses = localProcesses;
+          
+          for (const [k, p] of localProcesses.entries()) {
+            console.log(`[tts-synthesize] Killing active local server for ${k} to switch to ${localKey}`);
+            try {
+              (p as any).kill();
+            } catch {}
+            localProcesses.delete(k);
+          }
+          
+          console.log(`[tts-synthesize] Launching local server for ${localKey} using script ${scriptName}...`);
+          const { spawn } = require("child_process");
+          
+          // Prepend ffmpeg-static binary path to PATH to support decoding WebM/MP3 formats
+          const ffmpegStaticPath = path.join(process.cwd(), "node_modules", "ffmpeg-static");
+          const pathKey = Object.keys(process.env).find(k => k.toLowerCase() === "path") || "PATH";
+          const oldPath = process.env[pathKey] || "";
+          
+          const spawnEnv = {
+            ...process.env,
+            [pathKey]: `${ffmpegStaticPath}${path.delimiter}${oldPath}`
+          };
+          
+          const child = spawn("python", [scriptPath, "--port", "9880", "--model", modelPath], {
+            detached: false,
+            stdio: "inherit",
+            env: spawnEnv
+          });
+          
+          localProcesses.set(localKey, child);
+          
+          // Poll port 9880 until the adapter API is ready (up to 15 seconds)
+          console.log(`[tts-synthesize] Waiting for local adapter ${localKey} to bind to port 9880...`);
+          let adapterReady = false;
+          for (let i = 0; i < 30; i++) {
+            adapterReady = await new Promise<boolean>((resolve) => {
+              const client = require("http").request({
+                host: "127.0.0.1",
+                port: 9880,
+                path: "/v1/chat/completions",
+                method: "OPTIONS",
+                timeout: 300
+              }, () => resolve(true));
+              client.on("error", () => resolve(false));
+              client.on("timeout", () => resolve(false));
+              client.end();
+            });
+            if (adapterReady) {
+              console.log(`[tts-synthesize] Local adapter ${localKey} is ready on port 9880.`);
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+          if (!adapterReady) {
+            console.warn(`[tts-synthesize] Warning: Local adapter did not respond on port 9880 within 15 seconds. Proceeding anyway.`);
+          }
+        }
+      }
+      
+      baseUrl = "http://127.0.0.1:9880/v1";
+      apiKey = "local-tts-dummy-key";
+    }
+
     // 1. Resolve credentials (similar to describe-image endpoint)
     const authStorage = AuthStorage.create();
     const registry = ModelRegistry.create(authStorage);
     
-    apiKey = "";
-    baseUrl = "https://token-plan-cn.xiaomimimo.com/v1";
-
-    const availableModels = registry.getAvailable();
-    const modelIdLower = modelId.toLowerCase();
-    const model = availableModels.find(m => m.id.toLowerCase() === modelIdLower) || registry.getAll().find(m => m.id.toLowerCase() === modelIdLower);
-
-    if (model) {
-      const auth = await registry.getApiKeyAndHeaders(model);
-      if (auth.ok && auth.apiKey) {
-        apiKey = auth.apiKey;
-      }
-      if (model.baseUrl) {
-        baseUrl = model.baseUrl;
-      }
+    if (!isLocalModel) {
+      apiKey = "";
+      baseUrl = "https://token-plan-cn.xiaomimimo.com/v1";
+    } else {
+      // Keep local baseUrl and apiKey
     }
 
-    // Fallback lookup in auth storage and env if not resolved via ModelRegistry
-    if (!apiKey) {
-      const mimoAuth = authStorage.get("mimo") as { key?: string } | undefined;
-      const lingyaAuth = authStorage.get("lingya") as { key?: string } | undefined;
-      const xiaomiAuth = authStorage.get("xiaomi-token-plan") as { key?: string } | undefined;
-      const xiaomiCnAuth = authStorage.get("xiaomi-token-plan-cn") as { key?: string } | undefined;
+    if (!isLocalModel) {
+      const availableModels = registry.getAvailable();
+      const modelIdLower = modelId.toLowerCase();
+      const model = availableModels.find(m => m.id.toLowerCase() === modelIdLower) || registry.getAll().find(m => m.id.toLowerCase() === modelIdLower);
 
-      apiKey = mimoAuth?.key || lingyaAuth?.key || xiaomiAuth?.key || xiaomiCnAuth?.key || "";
-      if (!apiKey) {
-        apiKey = process.env.LINGYA_API_KEY || process.env.OPENAI_API_KEY || "";
+      if (model) {
+        const auth = await registry.getApiKeyAndHeaders(model);
+        if (auth.ok && auth.apiKey) {
+          apiKey = auth.apiKey;
+        }
+        if (model.baseUrl) {
+          baseUrl = model.baseUrl;
+        }
       }
 
-      // Dynamically align the base URL with the exact API key being used
-      if (apiKey === process.env.LINGYA_API_KEY && process.env.LINGYA_API_URL) {
-        baseUrl = process.env.LINGYA_API_URL;
-      } else if (xiaomiCnAuth?.key && apiKey === xiaomiCnAuth.key) {
-        baseUrl = "https://token-plan-cn.xiaomimimo.com/v1";
-      } else if (xiaomiAuth?.key && apiKey === xiaomiAuth.key) {
-        baseUrl = "https://token-plan.api.xiaomi.net/v1";
+      // Fallback lookup in auth storage and env if not resolved via ModelRegistry
+      if (!apiKey) {
+        const mimoAuth = authStorage.get("mimo") as { key?: string } | undefined;
+        const lingyaAuth = authStorage.get("lingya") as { key?: string } | undefined;
+        const xiaomiAuth = authStorage.get("xiaomi-token-plan") as { key?: string } | undefined;
+        const xiaomiCnAuth = authStorage.get("xiaomi-token-plan-cn") as { key?: string } | undefined;
+
+        apiKey = mimoAuth?.key || lingyaAuth?.key || xiaomiAuth?.key || xiaomiCnAuth?.key || "";
+        if (!apiKey) {
+          apiKey = process.env.LINGYA_API_KEY || process.env.OPENAI_API_KEY || "";
+        }
+
+        // Dynamically align the base URL with the exact API key being used
+        if (apiKey === process.env.LINGYA_API_KEY && process.env.LINGYA_API_URL) {
+          baseUrl = process.env.LINGYA_API_URL;
+        } else if (xiaomiCnAuth?.key && apiKey === xiaomiCnAuth.key) {
+          baseUrl = "https://token-plan-cn.xiaomimimo.com/v1";
+        } else if (xiaomiAuth?.key && apiKey === xiaomiAuth.key) {
+          baseUrl = "https://token-plan.api.xiaomi.net/v1";
+        }
       }
     }
     

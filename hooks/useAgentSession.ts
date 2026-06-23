@@ -69,6 +69,7 @@ export interface UseAgentSessionOptions {
   setToolPreset?: (preset: "none" | "default" | "full") => void;
   activeGemId?: string | null;
   onAgentEvent?: (event: AgentEvent) => void;
+  designSystem?: string | null;
 }
 
 export type ThinkingLevelOption = "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -494,7 +495,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         const selectedModel = newSessionModel;
         if (selectedModel) setPendingModel(selectedModel);
         const { PRESET_NONE, PRESET_DEFAULT, PRESET_FULL } = await import("@/components/ToolPanel");
-        const toolNames = toolPreset === "none" ? PRESET_NONE : toolPreset === "default" ? PRESET_DEFAULT : PRESET_FULL;
+        const effectiveToolPreset = toolPreset;
+        const toolNames = effectiveToolPreset === "none" ? PRESET_NONE : effectiveToolPreset === "default" ? PRESET_DEFAULT : PRESET_FULL;
         const res = await fetch("/api/agent/new", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -507,6 +509,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
             ...(thinkingLevel !== "auto" ? { thinkingLevel } : {}),
             ...(opts.activeGemId ? { gemId: opts.activeGemId } : {}),
+            ...(opts.designSystem ? { designSystem: opts.designSystem } : {}),
           }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -545,7 +548,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       dispatch({ type: "end" });
       sendingRef.current = false;
     }
-  }, [isNew, newSessionCwd, newSessionModel, toolPreset, thinkingLevel, session, agentRunning, connectEvents, onSessionCreated, opts.activeGemId, getProcessedMessage]);
+  }, [isNew, newSessionCwd, newSessionModel, toolPreset, thinkingLevel, session, agentRunning, connectEvents, onSessionCreated, opts.activeGemId, opts.designSystem, getProcessedMessage]);
 
   const handleAbort = useCallback(async () => {
     const sid = sessionIdRef.current;

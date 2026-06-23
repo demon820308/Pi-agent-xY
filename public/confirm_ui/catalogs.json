@@ -1,0 +1,992 @@
+{
+  "_comment": "Enumerable (finite) option universe for the confirm page. Served by Flask static at /static/catalogs.json; the front-end prefers /api/catalogs when the server provides it. These fields list ALL options and the AI marks one as recommended via recommendations.json `recommend`. Open/generative fields (color, typography, generated-image style) are NOT here — the AI authors a few candidates for those. 'canvas' mirrors scripts/config.py CANVAS_FORMATS — keep in sync. User-facing catalog text supports label_zh/label_en, desc_zh/desc_en, group_zh/group_en.",
+  "canvas": [
+    {
+      "id": "ppt169",
+      "label": "PPT 16:9",
+      "label_zh": "宽屏演示 16:9",
+      "label_en": "PPT 16:9",
+      "dim": "1280×720",
+      "use_zh": "现代投影 / 在线演示",
+      "use_en": "Modern projectors / online"
+    },
+    {
+      "id": "ppt43",
+      "label": "PPT 4:3",
+      "label_zh": "传统演示 4:3",
+      "label_en": "PPT 4:3",
+      "dim": "1024×768",
+      "use_zh": "传统投影",
+      "use_en": "Traditional projectors"
+    },
+    {
+      "id": "wechat",
+      "label": "WeChat Article Header",
+      "label_zh": "微信公众号头图",
+      "label_en": "WeChat Article Header",
+      "dim": "900×383",
+      "use_zh": "微信公众号文章封面",
+      "use_en": "WeChat article cover"
+    },
+    {
+      "id": "xiaohongshu",
+      "label": "Xiaohongshu (RED)",
+      "label_zh": "小红书图文",
+      "label_en": "Xiaohongshu (RED)",
+      "dim": "1242×1660",
+      "use_zh": "知识分享 / 种草封面",
+      "use_en": "Knowledge sharing"
+    },
+    {
+      "id": "moments",
+      "label": "WeChat Moments / IG",
+      "label_zh": "社交方图",
+      "label_en": "WeChat Moments / IG",
+      "dim": "1080×1080",
+      "use_zh": "社交媒体方图",
+      "use_en": "Social square"
+    },
+    {
+      "id": "story",
+      "label": "Story / TikTok",
+      "label_zh": "竖屏短视频",
+      "label_en": "Story / TikTok",
+      "dim": "1080×1920",
+      "use_zh": "短视频 / 竖屏封面",
+      "use_en": "Short-video / story cover"
+    },
+    {
+      "id": "banner",
+      "label": "Landscape Banner",
+      "label_zh": "横幅",
+      "label_en": "Landscape Banner",
+      "dim": "1920×1080",
+      "use_zh": "网页横幅 / 大屏",
+      "use_en": "Web banner / big screen"
+    },
+    {
+      "id": "a4",
+      "label": "A4 Print",
+      "label_zh": "A4 打印",
+      "label_en": "A4 Print",
+      "dim": "1240×1754",
+      "use_zh": "打印 / 文档导出",
+      "use_en": "Print / PDF export"
+    }
+  ],
+  "modes": [
+    {
+      "id": "pyramid",
+      "label": "pyramid",
+      "label_zh": "金字塔",
+      "label_en": "pyramid",
+      "desc_zh": "结论先行、相互独立且完全穷尽的论证、每个数据都带比较。适合决策、分析、战略、汇报。",
+      "desc_en": "Lead with the answer, use MECE reasoning, and compare every key data point. Best for decisions, analysis, strategy, and reporting."
+    },
+    {
+      "id": "narrative",
+      "label": "narrative",
+      "label_zh": "叙事",
+      "label_en": "narrative",
+      "desc_zh": "情境、张力、解决方案形成故事弧线，保留悬念与转折。适合路演、案例、品牌、融资。",
+      "desc_en": "Build a story arc from context to tension to resolution, with suspense and turns. Best for roadshows, cases, brand stories, and fundraising."
+    },
+    {
+      "id": "instructional",
+      "label": "instructional",
+      "label_zh": "教学",
+      "label_en": "instructional",
+      "desc_zh": "概念拆解、分步推进、并列讲解。适合培训、教程、科普、知识分享。",
+      "desc_en": "Break concepts down, advance step by step, and explain parallel ideas clearly. Best for training, tutorials, popular science, and knowledge sharing."
+    },
+    {
+      "id": "showcase",
+      "label": "showcase",
+      "label_zh": "展演",
+      "label_en": "showcase",
+      "desc_zh": "视觉主导，大图、大数和情绪节奏优先。适合发布、品牌秀、活动。",
+      "desc_en": "Use visual rhythm, large images, and strong numbers as the lead. Best for launches, brand showcases, and events."
+    },
+    {
+      "id": "briefing",
+      "label": "briefing",
+      "label_zh": "简报",
+      "label_en": "briefing",
+      "desc_zh": "中性完整、便于速览，采用主题式标题和均匀权重。适合周报、参考材料、常见问题、会议包。",
+      "desc_en": "Stay neutral, complete, and scannable with topical headings and balanced weight. Best for weekly reports, reference packs, FAQs, and meeting decks."
+    }
+  ],
+  "visual_styles": [
+    {
+      "group": "Corporate / product",
+      "group_zh": "企业 / 产品",
+      "group_en": "Corporate / product",
+      "items": [
+        {
+          "id": "swiss-minimal",
+          "label": "swiss-minimal",
+          "label_zh": "瑞士极简",
+          "label_en": "swiss-minimal",
+          "desc_zh": "网格锁定、锐利层级、大留白、少装饰。",
+          "desc_en": "Grid-locked layout, sharp hierarchy, generous whitespace, and minimal decoration.",
+          "color_presets": [
+            {
+              "name": "瑞士经典 (Swiss Classic)",
+              "name_zh": "瑞士经典 (Swiss Classic)",
+              "palette": {
+                "background": "#ffffff",
+                "secondary_bg": "#f5f5f7",
+                "primary": "#d9383a",
+                "accent": "#1d2430",
+                "secondary_accent": "#86868b",
+                "body_text": "#1d2430"
+              }
+            },
+            {
+              "name": "包豪斯中性 (Bauhaus Neutral)",
+              "name_zh": "包豪斯中性 (Bauhaus Neutral)",
+              "palette": {
+                "background": "#faf9f5",
+                "secondary_bg": "#f0ede4",
+                "primary": "#2c3539",
+                "accent": "#c25a38",
+                "secondary_accent": "#707e94",
+                "body_text": "#2c3539"
+              }
+            },
+            {
+              "name": "北欧冷调 (Nordic Cold)",
+              "name_zh": "北欧冷调 (Nordic Cold)",
+              "palette": {
+                "background": "#f8f9fa",
+                "secondary_bg": "#eceef0",
+                "primary": "#004d40",
+                "accent": "#00bfa5",
+                "secondary_accent": "#546e7a",
+                "body_text": "#263238"
+              }
+            }
+          ]
+        },
+        {
+          "id": "soft-rounded",
+          "label": "soft-rounded",
+          "label_zh": "柔和圆角",
+          "label_en": "soft-rounded",
+          "desc_zh": "圆角卡片、柔和投影、亲和现代。",
+          "desc_en": "Rounded cards, soft shadows, and a friendly modern tone.",
+          "color_presets": [
+            {
+              "name": "友好的现代 (Friendly Modern)",
+              "name_zh": "友好的现代 (Friendly Modern)",
+              "palette": {
+                "background": "#ffffff",
+                "secondary_bg": "#f5f7ff",
+                "primary": "#4f46e5",
+                "accent": "#f97316",
+                "secondary_accent": "#a5b4fc",
+                "body_text": "#1f2937"
+              }
+            },
+            {
+              "name": "薄荷奶油 (Mint Cream)",
+              "name_zh": "薄荷奶油 (Mint Cream)",
+              "palette": {
+                "background": "#f4fbf7",
+                "secondary_bg": "#e6f7ed",
+                "primary": "#059669",
+                "accent": "#10b981",
+                "secondary_accent": "#a7f3d0",
+                "body_text": "#064e3b"
+              }
+            },
+            {
+              "name": "粉彩糖果 (Pastel Candy)",
+              "name_zh": "粉彩糖果 (Pastel Candy)",
+              "palette": {
+                "background": "#faf5ff",
+                "secondary_bg": "#f3e8ff",
+                "primary": "#7c3aed",
+                "accent": "#db2777",
+                "secondary_accent": "#d8b4fe",
+                "body_text": "#3b0764"
+              }
+            }
+          ]
+        },
+        {
+          "id": "glassmorphism",
+          "label": "glassmorphism",
+          "label_zh": "玻璃拟态",
+          "label_en": "glassmorphism",
+          "desc_zh": "半透明玻璃面板、渐变光感、漂浮层次。",
+          "desc_en": "Translucent glass panels, gradient light, and floating depth.",
+          "color_presets": [
+            {
+              "name": "极光霓虹 (Aurora Glow)",
+              "name_zh": "极光霓虹 (Aurora Glow)",
+              "palette": {
+                "background": "#0f172a",
+                "secondary_bg": "#1e293b",
+                "primary": "#38bdf8",
+                "accent": "#ec4899",
+                "secondary_accent": "#818cf8",
+                "body_text": "#f8fafc"
+              }
+            },
+            {
+              "name": "翡翠之湖 (Emerald Lagoon)",
+              "name_zh": "翡翠之湖 (Emerald Lagoon)",
+              "palette": {
+                "background": "#022c22",
+                "secondary_bg": "#064e3b",
+                "primary": "#34d399",
+                "accent": "#a7f3d0",
+                "secondary_accent": "#14b8a6",
+                "body_text": "#f0fdf4"
+              }
+            },
+            {
+              "name": "星尘紫罗兰 (Cosmic Dust)",
+              "name_zh": "星尘紫罗兰 (Cosmic Dust)",
+              "palette": {
+                "background": "#18002a",
+                "secondary_bg": "#2d004d",
+                "primary": "#d946ef",
+                "accent": "#f43f5e",
+                "secondary_accent": "#c084fc",
+                "body_text": "#fae8ff"
+              }
+            }
+          ]
+        },
+        {
+          "id": "dark-tech",
+          "label": "dark-tech",
+          "label_zh": "深色科技",
+          "label_en": "dark-tech",
+          "desc_zh": "深色画布、发光强调、几何精确。",
+          "desc_en": "Dark canvas, glowing accents, and precise geometry.",
+          "color_presets": [
+            {
+              "name": "赛博青 (Cyberpunk Cyan)",
+              "name_zh": "赛博青 (Cyberpunk Cyan)",
+              "palette": {
+                "background": "#090d16",
+                "secondary_bg": "#121b2d",
+                "primary": "#00e5ff",
+                "accent": "#ff007f",
+                "secondary_accent": "#475569",
+                "body_text": "#cbd5e1"
+              }
+            },
+            {
+              "name": "黑客帝国 (Matrix Green)",
+              "name_zh": "黑客帝国 (Matrix Green)",
+              "palette": {
+                "background": "#050a06",
+                "secondary_bg": "#0e1810",
+                "primary": "#00ff66",
+                "accent": "#00aa33",
+                "secondary_accent": "#4b5563",
+                "body_text": "#d1d5db"
+              }
+            },
+            {
+              "name": "琥珀终端 (Amber Terminal)",
+              "name_zh": "琥珀终端 (Amber Terminal)",
+              "palette": {
+                "background": "#0f0f11",
+                "secondary_bg": "#1b1b1f",
+                "primary": "#ff9f0a",
+                "accent": "#ff453a",
+                "secondary_accent": "#5c5c62",
+                "body_text": "#e5e5ea"
+              }
+            }
+          ]
+        },
+        {
+          "id": "blueprint",
+          "label": "blueprint",
+          "label_zh": "蓝图",
+          "label_en": "blueprint",
+          "desc_zh": "深底蓝图线稿、等距结构、工程标注。",
+          "desc_en": "Dark blueprint linework, isometric structure, and engineering annotations.",
+          "color_presets": [
+            {
+              "name": "经典蓝图 (Classic Blueprint)",
+              "name_zh": "经典蓝图 (Classic Blueprint)",
+              "palette": {
+                "background": "#0a1d37",
+                "secondary_bg": "#142d4c",
+                "primary": "#00e8ff",
+                "accent": "#ffffff",
+                "secondary_accent": "#88b3cc",
+                "body_text": "#e2efff"
+              }
+            },
+            {
+              "name": "石墨图纸 (Slate Drafting)",
+              "name_zh": "石墨图纸 (Slate Drafting)",
+              "palette": {
+                "background": "#1e2229",
+                "secondary_bg": "#2a2f38",
+                "primary": "#7fbfff",
+                "accent": "#b3e0ff",
+                "secondary_accent": "#6b7380",
+                "body_text": "#e6ebf5"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "group": "Editorial / publication",
+      "group_zh": "编辑 / 出版",
+      "group_en": "Editorial / publication",
+      "items": [
+        {
+          "id": "editorial",
+          "label": "editorial",
+          "label_zh": "编辑出版",
+          "label_en": "editorial",
+          "desc_zh": "杂志式层级、栏线、衬线与无衬线交织。",
+          "desc_en": "Magazine hierarchy, column rules, and a serif/sans-serif mix.",
+          "color_presets": [
+            {
+              "name": "文学期刊 (Literary Journal)",
+              "name_zh": "文学期刊 (Literary Journal)",
+              "palette": {
+                "background": "#fdfcf7",
+                "secondary_bg": "#f5f2e9",
+                "primary": "#800020",
+                "accent": "#4a5d4e",
+                "secondary_accent": "#a3a99e",
+                "body_text": "#1c1d1f"
+              }
+            },
+            {
+              "name": "现代衬线 (Modern Serif)",
+              "name_zh": "现代衬线 (Modern Serif)",
+              "palette": {
+                "background": "#ffffff",
+                "secondary_bg": "#f0f4f8",
+                "primary": "#1e3a8a",
+                "accent": "#0ea5e9",
+                "secondary_accent": "#64748b",
+                "body_text": "#0f172a"
+              }
+            },
+            {
+              "name": "暖沙橄榄 (Warm Olive)",
+              "name_zh": "暖沙橄榄 (Warm Olive)",
+              "palette": {
+                "background": "#f5f5f0",
+                "secondary_bg": "#ebebe3",
+                "primary": "#3d402d",
+                "accent": "#707558",
+                "secondary_accent": "#a6ab91",
+                "body_text": "#1f201c"
+              }
+            }
+          ]
+        },
+        {
+          "id": "photo-editorial",
+          "label": "photo-editorial",
+          "label_zh": "摄影编辑",
+          "label_en": "photo-editorial",
+          "desc_zh": "满版摄影主导，文字点缀与图注配合。",
+          "desc_en": "Full-bleed photography leads, supported by light text and captions.",
+          "color_presets": [
+            {
+              "name": "哑光暗黑 (Matte Black)",
+              "name_zh": "哑光暗黑 (Matte Black)",
+              "palette": {
+                "background": "#121212",
+                "secondary_bg": "#1e1e1e",
+                "primary": "#ffffff",
+                "accent": "#e5e5e5",
+                "secondary_accent": "#737373",
+                "body_text": "#a3a3a3"
+              }
+            },
+            {
+              "name": "画廊纯白 (Gallery White)",
+              "name_zh": "画廊纯白 (Gallery White)",
+              "palette": {
+                "background": "#ffffff",
+                "secondary_bg": "#f5f5f5",
+                "primary": "#000000",
+                "accent": "#262626",
+                "secondary_accent": "#8e8e8e",
+                "body_text": "#262626"
+              }
+            }
+          ]
+        },
+        {
+          "id": "data-journalism",
+          "label": "data-journalism",
+          "label_zh": "数据新闻",
+          "label_en": "data-journalism",
+          "desc_zh": "多栏微图表、侧栏、来源线、信息密度高。",
+          "desc_en": "Multi-column microcharts, sidebars, source lines, and dense information.",
+          "color_presets": [
+            {
+              "name": "经济学人红 (Economist Red)",
+              "name_zh": "经济学人红 (Economist Red)",
+              "palette": {
+                "background": "#ffffff",
+                "secondary_bg": "#f0f2f5",
+                "primary": "#e3120b",
+                "accent": "#1f365c",
+                "secondary_accent": "#5e7a9c",
+                "body_text": "#1d2430"
+              }
+            },
+            {
+              "name": "时报石墨 (NYT Slate)",
+              "name_zh": "时报石墨 (NYT Slate)",
+              "palette": {
+                "background": "#fafafa",
+                "secondary_bg": "#f0f1f3",
+                "primary": "#121212",
+                "accent": "#2e5b82",
+                "secondary_accent": "#6c8ca6",
+                "body_text": "#121212"
+              }
+            }
+          ]
+        },
+        {
+          "id": "brutalist",
+          "label": "brutalist",
+          "label_zh": "粗野主义",
+          "label_en": "brutalist",
+          "desc_zh": "报纸密度、粗线框、原始结构、扁平表达。",
+          "desc_en": "Newspaper-like density, heavy rules, raw structure, and flat treatment.",
+          "color_presets": [
+            {
+              "name": "高亮警戒黄 (High Contrast Yellow)",
+              "name_zh": "高亮警戒黄 (High Contrast Yellow)",
+              "palette": {
+                "background": "#ffe600",
+                "secondary_bg": "#ffffff",
+                "primary": "#000000",
+                "accent": "#000000",
+                "secondary_accent": "#ffffff",
+                "body_text": "#000000"
+              }
+            },
+            {
+              "name": "粗糙水泥灰 (Raw Concrete)",
+              "name_zh": "粗糙水泥灰 (Raw Concrete)",
+              "palette": {
+                "background": "#d1d5db",
+                "secondary_bg": "#ffffff",
+                "primary": "#000000",
+                "accent": "#ef4444",
+                "secondary_accent": "#9ca3af",
+                "body_text": "#000000"
+              }
+            },
+            {
+              "name": "酸性荧光绿 (Acid Green)",
+              "name_zh": "酸性荧光绿 (Acid Green)",
+              "palette": {
+                "background": "#ffffff",
+                "secondary_bg": "#d8fcc2",
+                "primary": "#000000",
+                "accent": "#39ff14",
+                "secondary_accent": "#000000",
+                "body_text": "#000000"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "group": "Expressive / print",
+      "group_zh": "表现 / 印刷",
+      "group_en": "Expressive / print",
+      "items": [
+        {
+          "id": "memphis",
+          "label": "memphis",
+          "label_zh": "孟菲斯",
+          "label_en": "memphis",
+          "desc_zh": "撞色块、几何碎片、粗描边。",
+          "desc_en": "Contrasting color blocks, geometric scraps, and heavy outlines.",
+          "color_presets": [
+            {
+              "name": "马卡龙撞色 (Macaron Clashing)",
+              "name_zh": "马卡龙撞色 (Macaron Clashing)",
+              "palette": {
+                "background": "#fff9f2",
+                "secondary_bg": "#fed7aa",
+                "primary": "#db2777",
+                "accent": "#06b6d4",
+                "secondary_accent": "#facc15",
+                "body_text": "#1e2937"
+              }
+            },
+            {
+              "name": "复古波普 (Retro Pop)",
+              "name_zh": "复古波普 (Retro Pop)",
+              "palette": {
+                "background": "#ffffff",
+                "secondary_bg": "#bfdbfe",
+                "primary": "#2563eb",
+                "accent": "#ec4899",
+                "secondary_accent": "#facc15",
+                "body_text": "#0f172a"
+              }
+            }
+          ]
+        },
+        {
+          "id": "zine",
+          "label": "zine",
+          "label_zh": "小刊",
+          "label_en": "zine",
+          "desc_zh": "孔版印刷错位、半调、有限色、印刷颗粒。",
+          "desc_en": "Riso offsets, halftones, limited colors, and print grain.",
+          "color_presets": [
+            {
+              "name": "孔印粉蓝 (Riso Pink & Teal)",
+              "name_zh": "孔印粉蓝 (Riso Pink & Teal)",
+              "palette": {
+                "background": "#faf8f5",
+                "secondary_bg": "#fcf6e8",
+                "primary": "#ff4181",
+                "accent": "#00b0ff",
+                "secondary_accent": "#ffd740",
+                "body_text": "#1c1b18"
+              }
+            },
+            {
+              "name": "复印黑白 (Monochromatic Xerox)",
+              "name_zh": "复印黑白 (Monochromatic Xerox)",
+              "palette": {
+                "background": "#f2f2f2",
+                "secondary_bg": "#e5e5e5",
+                "primary": "#0a0a0f",
+                "accent": "#262635",
+                "secondary_accent": "#52526b",
+                "body_text": "#0a0a0f"
+              }
+            }
+          ]
+        },
+        {
+          "id": "vintage-poster",
+          "label": "vintage-poster",
+          "label_zh": "复古海报",
+          "label_en": "vintage-poster",
+          "desc_zh": "中世纪扁平色块、半调、复古几何暖意。",
+          "desc_en": "Mid-century flat color blocks, halftones, and warm vintage geometry.",
+          "color_presets": [
+            {
+              "name": "中世纪复古 (Mid-Century Warmth)",
+              "name_zh": "中世纪复古 (Mid-Century Warmth)",
+              "palette": {
+                "background": "#f3ebd6",
+                "secondary_bg": "#e6d5b3",
+                "primary": "#b85a3c",
+                "accent": "#2d5a27",
+                "secondary_accent": "#e2aa36",
+                "body_text": "#2c2a29"
+              }
+            },
+            {
+              "name": "包豪斯三原色 (Bauhaus Primary)",
+              "name_zh": "包豪斯三原色 (Bauhaus Primary)",
+              "palette": {
+                "background": "#f5eedc",
+                "secondary_bg": "#e4d6bc",
+                "primary": "#9e2a2b",
+                "accent": "#3f5e73",
+                "secondary_accent": "#d48c00",
+                "body_text": "#282828"
+              }
+            }
+          ]
+        },
+        {
+          "id": "paper-cut",
+          "label": "paper-cut",
+          "label_zh": "剪纸",
+          "label_en": "paper-cut",
+          "desc_zh": "层叠剪纸、层间柔影、手作质感。",
+          "desc_en": "Layered cut paper, soft inter-layer shadows, and a handmade feel.",
+          "color_presets": [
+            {
+              "name": "层叠朱红 (Crimson Layer)",
+              "name_zh": "层叠朱红 (Crimson Layer)",
+              "palette": {
+                "background": "#fdfbf7",
+                "secondary_bg": "#f3ebd6",
+                "primary": "#c92a2a",
+                "accent": "#862e9c",
+                "secondary_accent": "#d9480f",
+                "body_text": "#2b2521"
+              }
+            },
+            {
+              "name": "林深叠翠 (Forest Layer)",
+              "name_zh": "林深叠翠 (Forest Layer)",
+              "palette": {
+                "background": "#e6f4ea",
+                "secondary_bg": "#c2e7cd",
+                "primary": "#0d522c",
+                "accent": "#e0a916",
+                "secondary_accent": "#34a853",
+                "body_text": "#0c2c1a"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "group": "Hand-drawn / brush",
+      "group_zh": "手绘 / 笔触",
+      "group_en": "Hand-drawn / brush",
+      "items": [
+        {
+          "id": "sketch-notes",
+          "label": "sketch-notes",
+          "label_zh": "手绘笔记",
+          "label_en": "sketch-notes",
+          "desc_zh": "暖纸底、涂鸦线条、柔和彩块。",
+          "desc_en": "Warm paper, doodle lines, and soft color blocks.",
+          "color_presets": [
+            {
+              "name": "手绘暖阳 (Warm Journal)",
+              "name_zh": "手绘暖阳 (Warm Journal)",
+              "palette": {
+                "background": "#fffbeb",
+                "secondary_bg": "#fef3c7",
+                "primary": "#1e2937",
+                "accent": "#ea580c",
+                "secondary_accent": "#fbbf24",
+                "body_text": "#374151"
+              }
+            },
+            {
+              "name": "经典蓝格本 (Grid Notebook)",
+              "name_zh": "经典蓝格本 (Grid Notebook)",
+              "palette": {
+                "background": "#f8fafc",
+                "secondary_bg": "#f1f5f9",
+                "primary": "#0f172a",
+                "accent": "#ec4899",
+                "secondary_accent": "#94a3b8",
+                "body_text": "#1e293b"
+              }
+            }
+          ]
+        },
+        {
+          "id": "ink-notes",
+          "label": "ink-notes",
+          "label_zh": "墨迹笔记",
+          "label_en": "ink-notes",
+          "desc_zh": "浅底、黑色手写墨迹、稀疏语义强调。",
+          "desc_en": "Light background, black handwritten ink, and sparse semantic emphasis.",
+          "color_presets": [
+            {
+              "name": "古意徽墨 (Classic Calligraphy)",
+              "name_zh": "古意徽墨 (Classic Calligraphy)",
+              "palette": {
+                "background": "#faf9f6",
+                "secondary_bg": "#f2effa",
+                "primary": "#000000",
+                "accent": "#d9383a",
+                "secondary_accent": "#7f7f7f",
+                "body_text": "#0a0a0a"
+              }
+            },
+            {
+              "name": "竹海松烟 (Bamboo Green Ink)",
+              "name_zh": "竹海松烟 (Bamboo Green Ink)",
+              "palette": {
+                "background": "#fbfcf7",
+                "secondary_bg": "#f3f6e8",
+                "primary": "#1c1d1a",
+                "accent": "#2e7d32",
+                "secondary_accent": "#75a478",
+                "body_text": "#1c1d1a"
+              }
+            }
+          ]
+        },
+        {
+          "id": "chalkboard",
+          "label": "chalkboard",
+          "label_zh": "黑板",
+          "label_en": "chalkboard",
+          "desc_zh": "深板岩底、粉笔笔触、粉彩强调。",
+          "desc_en": "Dark slate surface, chalk strokes, and pastel emphasis.",
+          "color_presets": [
+            {
+              "name": "经典绿板 (Classic Slate)",
+              "name_zh": "经典绿板 (Classic Slate)",
+              "palette": {
+                "background": "#162e24",
+                "secondary_bg": "#1f3f32",
+                "primary": "#ffffff",
+                "accent": "#ffeb3b",
+                "secondary_accent": "#b9f6ca",
+                "body_text": "#eceff1"
+              }
+            },
+            {
+              "name": "炭黑粉笔板 (Charcoal Board)",
+              "name_zh": "炭黑粉笔板 (Charcoal Board)",
+              "palette": {
+                "background": "#1e1e24",
+                "secondary_bg": "#25252d",
+                "primary": "#ffffff",
+                "accent": "#80d8ff",
+                "secondary_accent": "#ffd180",
+                "body_text": "#eceff1"
+              }
+            }
+          ]
+        },
+        {
+          "id": "ink-wash",
+          "label": "ink-wash",
+          "label_zh": "水墨",
+          "label_en": "ink-wash",
+          "desc_zh": "宣纸留白、笔触、印章、静气，新中式表达。",
+          "desc_en": "Rice-paper whitespace, brushwork, seals, and a quiet contemporary Chinese tone.",
+          "color_presets": [
+            {
+              "name": "禅宗墨意 (Zen Ink)",
+              "name_zh": "禅宗墨意 (Zen Ink)",
+              "palette": {
+                "background": "#f5f4f0",
+                "secondary_bg": "#e6e4df",
+                "primary": "#1a1a1a",
+                "accent": "#b71c1c",
+                "secondary_accent": "#8d8d8d",
+                "body_text": "#2b2b2b"
+              }
+            },
+            {
+              "name": "秋风山水 (Autumn Wash)",
+              "name_zh": "秋风山水 (Autumn Wash)",
+              "palette": {
+                "background": "#f7f4eb",
+                "secondary_bg": "#ebe5d5",
+                "primary": "#1f2420",
+                "accent": "#a04000",
+                "secondary_accent": "#807060",
+                "body_text": "#2b2420"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "group": "Specialty",
+      "group_zh": "特殊风格",
+      "group_en": "Specialty",
+      "items": [
+        {
+          "id": "pixel-art",
+          "label": "pixel-art",
+          "label_zh": "像素风",
+          "label_en": "pixel-art",
+          "desc_zh": "严格像素网格、块状形体、有限色、扁平表达。",
+          "desc_en": "Strict pixel grid, blocky shapes, limited colors, and flat treatment.",
+          "color_presets": [
+            {
+              "name": "掌机黑白 (GameBoy Classic)",
+              "name_zh": "掌机黑白 (GameBoy Classic)",
+              "palette": {
+                "background": "#9bbc0f",
+                "secondary_bg": "#8bac0f",
+                "primary": "#0f380f",
+                "accent": "#306230",
+                "secondary_accent": "#8bac0f",
+                "body_text": "#0f380f"
+              }
+            },
+            {
+              "name": "街机霓虹 (Arcade Retro)",
+              "name_zh": "街机霓虹 (Arcade Retro)",
+              "palette": {
+                "background": "#0c0c16",
+                "secondary_bg": "#181830",
+                "primary": "#ff0055",
+                "accent": "#00ffff",
+                "secondary_accent": "#ffff00",
+                "body_text": "#ffffff"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "icons": [
+    {
+      "id": "chunk-filled",
+      "label": "chunk-filled",
+      "label_zh": "几何实心图标",
+      "label_en": "chunk-filled",
+      "desc_zh": "实心、直线几何、锐利厚重，适合科技、工程、企业结构图。",
+      "desc_en": "Solid, straight, geometric, sharp, and heavy. Good for tech, engineering, and corporate structure diagrams."
+    },
+    {
+      "id": "tabler-filled",
+      "label": "tabler-filled",
+      "label_zh": "圆润实心图标",
+      "label_en": "tabler-filled",
+      "desc_zh": "实心、圆润曲线、中等视觉重量，适合亲和现代风格。",
+      "desc_en": "Solid, rounded, and medium-weight. Good for friendly modern styles."
+    },
+    {
+      "id": "tabler-outline",
+      "label": "tabler-outline",
+      "label_zh": "线性描边图标",
+      "label_en": "tabler-outline",
+      "desc_zh": "线性描边，轻盈精致，适合屏幕阅读和编辑型图标。",
+      "desc_en": "Linear stroke, light and refined. Good for screen reading and editable icons."
+    },
+    {
+      "id": "phosphor-duotone",
+      "label": "phosphor-duotone",
+      "label_zh": "双色层次图标",
+      "label_en": "phosphor-duotone",
+      "desc_zh": "双色层次、中等重量，适合现代产品和平台类表达。",
+      "desc_en": "Two-tone layering with medium weight. Good for modern product and platform narratives."
+    },
+    {
+      "id": "emoji",
+      "label": "Emoji",
+      "label_zh": "表情符号",
+      "label_en": "Emoji",
+      "desc_zh": "系统表情符号，适合轻量、社交、教学或快速识别场景；正式企业 / 咨询风谨慎使用。",
+      "desc_en": "System emoji for lightweight, social, instructional, or quick-recognition contexts; use carefully in formal corporate or consulting decks."
+    },
+    {
+      "id": "none",
+      "label": "不用图标",
+      "label_zh": "不用图标",
+      "label_en": "No icons"
+    }
+  ],
+  "image_usage": [
+    {
+      "id": "ai",
+      "label": "AI 生成",
+      "label_zh": "生成配图",
+      "label_en": "AI-generated"
+    },
+    {
+      "id": "web",
+      "label": "Web 来源",
+      "label_zh": "网络来源",
+      "label_en": "Web-sourced"
+    },
+    {
+      "id": "provided",
+      "label": "用户提供",
+      "label_zh": "用户提供",
+      "label_en": "User-provided"
+    },
+    {
+      "id": "placeholder",
+      "label": "占位符",
+      "label_zh": "占位符",
+      "label_en": "Placeholder"
+    },
+    {
+      "id": "none",
+      "label": "不使用图片",
+      "label_zh": "不使用图片",
+      "label_en": "No images"
+    }
+  ],
+  "image_ai_path": [
+    {
+      "id": "auto",
+      "label": "Automatic Path A → Path B → Offline Manual",
+      "label_zh": "自动选择",
+      "label_en": "Automatic Path A → Path B → Offline Manual"
+    },
+    {
+      "id": "api",
+      "label": "Path A",
+      "label_zh": "接口后端",
+      "label_en": "Path A",
+      "desc_zh": "强制走接口后端，第 5 步运行 image_gen.py（需已配置 IMAGE_BACKEND）。",
+      "desc_en": "Force the API backend — image_gen.py runs in Step 5 (requires IMAGE_BACKEND)."
+    },
+    {
+      "id": "host-native",
+      "label": "Path B",
+      "label_zh": "宿主原生工具",
+      "label_en": "Path B",
+      "desc_zh": "强制使用当前环境的原生图像工具生成（即使配置了 IMAGE_BACKEND 也跳过接口）；需宿主提供原生图像工具（Codex / Claude Code 等）。",
+      "desc_en": "Force the host's native image tool (skips the API even if IMAGE_BACKEND is set); requires a host with a native image tool (Codex / Claude Code / similar)."
+    },
+    {
+      "id": "manual",
+      "label": "Offline Manual",
+      "label_zh": "离线手动",
+      "label_en": "Offline Manual",
+      "desc_zh": "机制：写入图片提示词文件；用户在外部生成后放入项目图片目录。",
+      "desc_en": "Prompts written to images/image_prompts.json; user generates externally and places files in project/images/."
+    }
+  ],
+  "formula_policy": [
+    {
+      "id": "mixed",
+      "label": "mixed",
+      "label_zh": "混合",
+      "label_en": "mixed",
+      "desc_zh": "复杂公式渲染为图片；简单行内公式保持为可编辑文本或字符。",
+      "desc_en": "Render complex formula-worthy expressions to PNG; keep simple inline math as editable text / Unicode."
+    },
+    {
+      "id": "render-all",
+      "label": "render-all",
+      "label_zh": "全部渲染",
+      "label_en": "render-all",
+      "desc_zh": "所有需要按公式处理的表达式都渲染为图片。",
+      "desc_en": "Render every formula-worthy expression to PNG."
+    },
+    {
+      "id": "text-only",
+      "label": "text-only",
+      "label_zh": "仅文本",
+      "label_en": "text-only",
+      "desc_zh": "不渲染公式；表达式保持为可编辑文本或字符。",
+      "desc_en": "Do not render formulas; keep expressions as editable text / Unicode."
+    }
+  ],
+  "generation_mode": [
+    {
+      "id": "continuous",
+      "label": "continuous",
+      "label_zh": "连续模式",
+      "label_en": "continuous"
+    },
+    {
+      "id": "split",
+      "label": "split",
+      "label_zh": "分段模式",
+      "label_en": "split"
+    }
+  ]
+}

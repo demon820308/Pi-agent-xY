@@ -21,7 +21,9 @@ function shortenPath(p: string): string {
 }
 
 function sourceLabel(skill: Skill): string {
+  if (skill.filePath.startsWith("virtual:") || skill.filePath === "built-in:agent-skills" || skill.sourceInfo?.source === "virtual") return "virtual";
   const src = skill.sourceInfo?.source;
+  if (src === "built-in") return "built-in";
   const scope = skill.sourceInfo?.scope;
   if (scope === "user" || src === "user") return "global";
   if (scope === "project" || src === "project") return "project";
@@ -92,8 +94,27 @@ function SkillDetail({
 }) {
   const label = sourceLabel(skill);
   const enabled = !skill.disableModelInvocation;
+  const isVirtual = skill.filePath.startsWith("virtual:");
+  const providerId = isVirtual ? skill.filePath.replace("virtual:", "") : "";
+
+  const [keyConfigured, setKeyConfigured] = useState(false);
+  const [keyInput, setKeyInput] = useState("");
+  const [savingKey, setSavingKey] = useState(false);
+
+  useEffect(() => {
+    if (isVirtual) {
+      setKeyInput("");
+      fetch(`/api/auth/api-key/${providerId}`)
+        .then((res) => res.json())
+        .then((d) => {
+          setKeyConfigured(!!d.configured);
+        })
+        .catch(() => {});
+    }
+  }, [skill.filePath, isVirtual, providerId]);
 
   function displayPath(p: string): string {
+    if (isVirtual) return "built-in integration";
     if (label === "project" && p.startsWith(cwd)) {
       const rel = p.slice(cwd.length).replace(/^[/\\]/, "");
       return `./${rel}`;
@@ -114,9 +135,19 @@ function SkillDetail({
             background:
               label === "project"
                 ? "rgba(99,102,241,0.12)"
-                : "rgba(120,120,120,0.12)",
+                : label === "built-in"
+                  ? "rgba(34,197,94,0.12)"
+                  : label === "virtual"
+                    ? "rgba(168,85,247,0.12)"
+                    : "rgba(120,120,120,0.12)",
             color:
-              label === "project" ? "rgba(99,102,241,0.8)" : "var(--text-dim)",
+              label === "project" 
+                ? "rgba(99,102,241,0.8)" 
+                : label === "built-in"
+                  ? "rgba(34,197,94,0.8)"
+                  : label === "virtual"
+                    ? "rgba(168,85,247,0.8)"
+                    : "var(--text-dim)",
           }}
         >
           {label}
@@ -175,6 +206,97 @@ function SkillDetail({
           {skill.description}
         </span>
       </div>
+
+      {isVirtual && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10, borderTop: "1px solid var(--border)", paddingTop: 16 }}>
+          <span
+            style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}
+          >
+            API Key Config
+          </span>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              type="password"
+              value={keyInput}
+              onChange={(e) => setKeyInput(e.target.value)}
+              placeholder={keyConfigured ? "••••••••••••••••" : "Enter API Key..."}
+              style={{
+                flex: 1,
+                padding: "6px 9px",
+                background: "var(--bg-panel)",
+                border: "1px solid var(--border)",
+                borderRadius: 5,
+                color: "var(--text)",
+                fontSize: 12,
+                outline: "none",
+                fontFamily: "var(--font-mono)",
+              }}
+            />
+            <button
+              onClick={async () => {
+                if (!keyInput.trim()) return;
+                setSavingKey(true);
+                try {
+                  const res = await fetch(`/api/auth/api-key/${providerId}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ apiKey: keyInput.trim() }),
+                  });
+                  if (res.ok) {
+                    setKeyConfigured(true);
+                    setKeyInput("");
+                  }
+                } catch (e) {
+                  console.error(e);
+                } finally {
+                  setSavingKey(false);
+                }
+              }}
+              disabled={savingKey || !keyInput.trim()}
+              style={{
+                padding: "6px 12px",
+                fontSize: 12,
+                borderRadius: 5,
+                border: "none",
+                background: keyInput.trim() ? "var(--accent)" : "var(--border)",
+                color: keyInput.trim() ? "#fff" : "var(--text-dim)",
+                cursor: keyInput.trim() ? "pointer" : "not-allowed",
+                fontWeight: 600,
+              }}
+            >
+              {savingKey ? "Saving…" : "Save"}
+            </button>
+            {keyConfigured && (
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await fetch(`/api/auth/api-key/${providerId}`, {
+                      method: "DELETE",
+                    });
+                    if (res.ok) {
+                      setKeyConfigured(false);
+                      setKeyInput("");
+                    }
+                  } catch (e) {
+                    console.error(e);
+                  }
+                }}
+                style={{
+                  padding: "5px 12px",
+                  fontSize: 12,
+                  borderRadius: 5,
+                  border: "1px solid rgba(239,68,68,0.3)",
+                  background: "none",
+                  color: "#ef4444",
+                  cursor: "pointer",
+                }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -520,7 +642,33 @@ export function SkillsConfig({
   const [toggling, setToggling] = useState<Set<string>>(new Set());
   const [saveError, setSaveError] = useState<string | null>(null);
   const [addMode, setAddMode] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<{ success: boolean; message: string } | null>(null);
 
+  const handleSync = async () => {
+    setSyncing(true);
+    setSyncStatus(null);
+    try {
+      const res = await fetch("/api/skills/sync", { 
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd }),
+      });
+      const data = await res.json() as { success?: boolean; message?: string; error?: string };
+      if (!res.ok || data.error) {
+        setSyncStatus({ success: false, message: data.error || "Sync failed" });
+      } else {
+        setSyncStatus({ success: true, message: data.message || "Successfully synced skills" });
+        loadSkills();
+      }
+    } catch (e: any) {
+      setSyncStatus({ success: false, message: e.message || String(e) });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const loadSkills = useCallback(() => {
     setLoading(true);
     setError(null);
@@ -533,11 +681,25 @@ export function SkillsConfig({
         }
         const list = d.skills ?? [];
         setSkills(list);
-        if (list.length > 0 && !selected) setSelected(list[0].filePath);
+        if (!selected) setSelected("built-in:agent-skills");
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
   }, [cwd, selected]);
+
+  const agentSkills = skills.filter((s) => s.sourceInfo?.source === "built-in");
+  const baseRegularSkills = skills.filter((s) => s.sourceInfo?.source !== "built-in");
+  const regularSkills = [
+    ...baseRegularSkills,
+    {
+      name: "Agent Skills",
+      description: "Production-grade engineering skills for AI coding agents. Includes spec, plan, build, verify, and review workflows.",
+      filePath: "built-in:agent-skills",
+      baseDir: "built-in",
+      disableModelInvocation: false,
+      sourceInfo: { source: "virtual", scope: "global" }
+    } as Skill
+  ];
 
   useEffect(() => {
     loadSkills();
@@ -656,6 +818,40 @@ export function SkillsConfig({
           </button>
         </div>
 
+        {/* Sync Status Banner */}
+        {syncStatus && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "8px 18px",
+              fontSize: 12,
+              background: syncStatus.success
+                ? "rgba(34,197,94,0.12)"
+                : "rgba(239,68,68,0.12)",
+              color: syncStatus.success ? "#16a34a" : "#ef4444",
+              borderBottom: "1px solid var(--border)",
+            }}
+          >
+            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{syncStatus.message}</span>
+            <button
+              onClick={() => setSyncStatus(null)}
+              style={{
+                background: "none",
+                border: "none",
+                color: "inherit",
+                cursor: "pointer",
+                fontSize: 14,
+                lineHeight: 1,
+                padding: "0 4px",
+              }}
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         {/* Body */}
         <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
           {/* Left: skill list */}
@@ -690,7 +886,7 @@ export function SkillsConfig({
                 >
                   {error}
                 </div>
-              ) : skills.length === 0 ? (
+              ) : regularSkills.length === 0 ? (
                 <div
                   style={{
                     padding: "10px 8px",
@@ -703,8 +899,8 @@ export function SkillsConfig({
               ) : (
                 (() => {
                   const groups: { label: string; skills: typeof skills }[] = [];
-                  for (const grpLabel of ["project", "global", "path"]) {
-                    const grpSkills = skills.filter(
+                  for (const grpLabel of ["project", "global", "virtual", "path"]) {
+                    const grpSkills = regularSkills.filter(
                       (s) => sourceLabel(s) === grpLabel,
                     );
                     if (grpSkills.length > 0)
@@ -854,7 +1050,17 @@ export function SkillsConfig({
                   loadSkills();
                 }}
               />
-            ) : loading ? null : selectedSkill ? (
+            ) : loading ? null : selected === "built-in:agent-skills" ? (
+              <AgentSkillsDashboard
+                agentSkills={agentSkills}
+                syncing={syncing}
+                syncStatus={syncStatus}
+                setSyncStatus={setSyncStatus}
+                handleSync={handleSync}
+                toggle={toggle}
+                toggling={toggling}
+              />
+            ) : selectedSkill ? (
               <SkillDetail
                 key={selectedSkill.filePath}
                 skill={selectedSkill}
@@ -906,6 +1112,181 @@ export function SkillsConfig({
             Close
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function AgentSkillsDashboard({
+  agentSkills,
+  syncing,
+  syncStatus,
+  setSyncStatus,
+  handleSync,
+  toggle,
+  toggling,
+}: {
+  agentSkills: Skill[];
+  syncing: boolean;
+  syncStatus: { success: boolean; message: string } | null;
+  setSyncStatus: (s: { success: boolean; message: string } | null) => void;
+  handleSync: () => void;
+  toggle: (skill: Skill) => void;
+  toggling: Set<string>;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 20 }}>
+      {/* Dashboard Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid var(--border)", paddingBottom: 16 }}>
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text)" }}>Agent Skills</div>
+          <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 4 }}>
+            Production-grade engineering skills for AI coding agents.
+          </div>
+        </div>
+
+        <button
+          onClick={handleSync}
+          disabled={syncing}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px 14px",
+            fontSize: 13,
+            fontWeight: 600,
+            borderRadius: 6,
+            border: "none",
+            background: syncing ? "var(--bg-hover)" : "var(--accent)",
+            color: syncing ? "var(--text)" : "#fff",
+            cursor: syncing ? "wait" : "pointer",
+            transition: "all 0.15s ease",
+            boxShadow: syncing ? "none" : "0 1px 3px rgba(0,0,0,0.1)",
+          }}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{
+              animation: syncing ? "spin 1.2s linear infinite" : "none",
+            }}
+          >
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+          </svg>
+          {syncing ? "Syncing..." : "Update from GitHub"}
+        </button>
+      </div>
+
+      {/* Sync Status Banner */}
+      {syncStatus && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "10px 16px",
+            borderRadius: 6,
+            fontSize: 13,
+            background: syncStatus.success
+              ? "rgba(34,197,94,0.12)"
+              : "rgba(239,68,68,0.12)",
+            color: syncStatus.success ? "#16a34a" : "#ef4444",
+            border: syncStatus.success
+              ? "1px solid rgba(34,197,94,0.2)"
+              : "1px solid rgba(239,68,68,0.2)",
+          }}
+        >
+          <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{syncStatus.message}</span>
+          <button
+            onClick={() => setSyncStatus(null)}
+            style={{
+              background: "none",
+              border: "none",
+              color: "inherit",
+              cursor: "pointer",
+              fontSize: 16,
+              lineHeight: 1,
+              padding: "0 4px",
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {/* Nested Skills List */}
+      <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
+        {agentSkills.length === 0 ? (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              height: 200,
+              color: "var(--text-dim)",
+              gap: 12,
+              border: "1px dashed var(--border)",
+              borderRadius: 8,
+            }}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+              <line x1="12" y1="22.08" x2="12" y2="12" />
+            </svg>
+            <div style={{ fontSize: 13, textAlign: "center" }}>
+              No agent skills installed.<br />Click &quot;Update from GitHub&quot; to download the official repository.
+            </div>
+          </div>
+        ) : (
+          agentSkills.map((skill) => {
+            const enabled = !skill.disableModelInvocation;
+            const isToggling = toggling.has(skill.filePath);
+            return (
+              <div
+                key={skill.filePath}
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  justifyContent: "space-between",
+                  gap: 16,
+                  padding: "14px 16px",
+                  borderRadius: 8,
+                  border: "1px solid var(--border)",
+                  background: "var(--bg-panel)",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", fontFamily: "var(--font-mono)" }}>
+                    {skill.name}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6, lineHeight: 1.5 }}>
+                    {skill.description}
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, marginTop: 2 }}>
+                  <span style={{ fontSize: 11, color: enabled ? "var(--accent)" : "var(--text-dim)" }}>
+                    {enabled ? "Enabled" : "Disabled"}
+                  </span>
+                  <Toggle
+                    enabled={enabled}
+                    loading={isToggling}
+                    onToggle={() => toggle(skill)}
+                  />
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
   );

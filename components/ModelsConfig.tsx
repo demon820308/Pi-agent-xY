@@ -612,12 +612,16 @@ function OAuthDetail({
   models = [],
   defaultModel,
   onSetDefault,
+  syncing,
+  onSync,
 }: {
   provider: OAuthProvider;
   onRefresh: () => void;
   models?: { id: string; name: string }[];
   defaultModel?: { provider: string; modelId: string } | null;
   onSetDefault?: (provider: string, modelId: string) => void;
+  syncing?: boolean;
+  onSync?: () => void;
 }) {
   const [loginState, setLoginState] = useState<OAuthLoginState>({ phase: "idle" });
   const [inputValue, setInputValue] = useState("");
@@ -861,12 +865,28 @@ function OAuthDetail({
               {provider.loggedIn ? "Re-login" : "Login"}
             </button>
             {provider.loggedIn && (
-              <button
-                onClick={handleLogout}
-                style={{ padding: "5px 12px", background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 5, color: "#ef4444", cursor: "pointer", fontSize: 12 }}
-              >
-                Disconnect
-              </button>
+              <>
+                <button
+                  onClick={handleLogout}
+                  style={{ padding: "5px 12px", background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 5, color: "#ef4444", cursor: "pointer", fontSize: 12 }}
+                >
+                  Disconnect
+                </button>
+                <button
+                  type="button"
+                  onClick={onSync}
+                  disabled={syncing}
+                  style={{
+                    padding: "5px 12px",
+                    background: "none", border: "1px solid var(--border)",
+                    borderRadius: 5, color: "var(--text-muted)",
+                    cursor: syncing ? "not-allowed" : "pointer", fontSize: 12,
+                    display: "inline-flex", alignItems: "center", gap: 5
+                  }}
+                >
+                  {syncing ? "Syncing..." : "🔄 Sync Models"}
+                </button>
+              </>
             )}
           </>
         )}
@@ -946,12 +966,16 @@ function ApiKeyDetail({
   models = [],
   defaultModel,
   onSetDefault,
+  syncing,
+  onSync,
 }: {
   provider: ApiKeyProvider;
   onRefresh: () => void;
   models?: { id: string; name: string }[];
   defaultModel?: { provider: string; modelId: string } | null;
   onSetDefault?: (provider: string, modelId: string) => void;
+  syncing?: boolean;
+  onSync?: () => void;
 }) {
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
@@ -1064,18 +1088,34 @@ function ApiKeyDetail({
       {error && <p style={{ margin: 0, fontSize: 12, color: "#f87171" }}>{error}</p>}
 
       {provider.configured && (
-        <button
-          onClick={handleRemove}
-          disabled={removing}
-          style={{
-            alignSelf: "flex-start", padding: "5px 12px",
-            background: "none", border: "1px solid rgba(239,68,68,0.3)",
-            borderRadius: 5, color: "#ef4444",
-            cursor: removing ? "not-allowed" : "pointer", fontSize: 12,
-          }}
-        >
-          {removing ? "Removing…" : "Disconnect"}
-        </button>
+        <div style={{ display: "flex", gap: 8, alignSelf: "flex-start" }}>
+          <button
+            onClick={handleRemove}
+            disabled={removing}
+            style={{
+              padding: "5px 12px",
+              background: "none", border: "1px solid rgba(239,68,68,0.3)",
+              borderRadius: 5, color: "#ef4444",
+              cursor: removing ? "not-allowed" : "pointer", fontSize: 12,
+            }}
+          >
+            {removing ? "Removing…" : "Disconnect"}
+          </button>
+          <button
+            type="button"
+            onClick={onSync}
+            disabled={syncing}
+            style={{
+              padding: "5px 12px",
+              background: "none", border: "1px solid var(--border)",
+              borderRadius: 5, color: "var(--text-muted)",
+              cursor: syncing ? "not-allowed" : "pointer", fontSize: 12,
+              display: "inline-flex", alignItems: "center", gap: 5
+            }}
+          >
+            {syncing ? "Syncing..." : "🔄 Sync Models"}
+          </button>
+        </div>
       )}
 
       {models.length > 0 && (
@@ -1290,6 +1330,223 @@ function AddProviderPicker({
   );
 }
 
+interface LocalModelStatus {
+  status: "not_downloaded" | "downloading" | "completed" | "failed";
+  progress: number;
+  speed?: string;
+}
+
+function LocalTtsDetail() {
+  const [statuses, setStatuses] = useState<Record<string, LocalModelStatus>>({
+    voxcpm2: { status: "not_downloaded", progress: 0 },
+    cosyvoice: { status: "not_downloaded", progress: 0 },
+    "gpt-sovits": { status: "not_downloaded", progress: 0 }
+  });
+  const [mirror, setMirror] = useState<"modelscope" | "huggingface">("modelscope");
+  const [loading, setLoading] = useState(true);
+  const timerRef = useRef<any>(null);
+
+  const fetchStatuses = async () => {
+    try {
+      const res = await fetch("/api/tts/manage-models");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.models) {
+          setStatuses(data.models);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchStatuses();
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
+
+  const isAnyDownloading = Object.values(statuses).some(s => s.status === "downloading");
+  useEffect(() => {
+    if (isAnyDownloading) {
+      if (!timerRef.current) {
+        timerRef.current = setInterval(fetchStatuses, 1500);
+      }
+    } else {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    }
+  }, [isAnyDownloading]);
+
+  const handleDownload = async (modelId: string) => {
+    try {
+      setStatuses(prev => ({
+        ...prev,
+        [modelId]: { status: "downloading", progress: 0, speed: "Initializing..." }
+      }));
+      await fetch("/api/tts/manage-models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelId, action: "download", mirror })
+      });
+      fetchStatuses();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleCancel = async (modelId: string) => {
+    try {
+      await fetch("/api/tts/manage-models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelId, action: "cancel" })
+      });
+      fetchStatuses();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const modelsInfo = [
+    {
+      id: "voxcpm2",
+      name: "VoxCPM2 (小米 MiMo 原型)",
+      desc: "2B 参数，48kHz 广播级声音质量。克隆精度极高，支持语气、语速、情感细粒度调控。建议配置 8GB+ 显存显卡。",
+      size: "约 1.8 GB"
+    },
+    {
+      id: "cosyvoice",
+      name: "CosyVoice-300M (阿里开源)",
+      desc: "300M 参数，多语言克隆拟真度之王。支持跨语种声音克隆。建议配置 4GB+ 显存显卡。",
+      size: "约 1.2 GB"
+    },
+    {
+      id: "gpt-sovits",
+      name: "GPT-SoVITS (极轻量克隆)",
+      desc: "极轻量设计，仅需 2GB 显存，在低配或纯 CPU 电脑上也能流畅合成。相似度高，非常适合低配用户。",
+      size: "约 800 MB"
+    }
+  ];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <SectionTitle>本地声音克隆模型管理</SectionTitle>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>下载源镜像:</span>
+          <select 
+            value={mirror} 
+            onChange={(e) => setMirror(e.target.value as any)}
+            style={{ 
+              padding: "4px 8px", 
+              background: "var(--bg-panel)", 
+              border: "1px solid var(--border)", 
+              borderRadius: 4, 
+              color: "var(--text)", 
+              fontSize: 11 
+            }}
+          >
+            <option value="modelscope">ModelScope (国内高速)</option>
+            <option value="huggingface">HuggingFace (官方)</option>
+          </select>
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ fontSize: 12, color: "var(--text-dim)" }}>加载中...</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {modelsInfo.map(m => {
+            const status = statuses[m.id] || { status: "not_downloaded", progress: 0 };
+            return (
+              <div 
+                key={m.id} 
+                style={{ 
+                  padding: 14, 
+                  background: "var(--bg-panel)", 
+                  border: "1px solid var(--border)", 
+                  borderRadius: 8,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{m.name}</span>
+                  <span style={{ fontSize: 11, color: "var(--text-dim)" }}>{m.size}</span>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5 }}>{m.desc}</div>
+                
+                {status.status === "downloading" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--text-muted)" }}>
+                      <span>下载进度: {status.progress}%</span>
+                      <span>{status.speed}</span>
+                    </div>
+                    <div style={{ height: 6, background: "var(--border)", borderRadius: 3, overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${status.progress}%`, background: "var(--accent)", transition: "width 0.2s" }} />
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4 }}>
+                  <div style={{ fontSize: 11 }}>
+                    {status.status === "completed" && <span style={{ color: "#10b981", fontWeight: 600 }}>✅ 已下载，已在 Pipeline 中启用</span>}
+                    {status.status === "downloading" && <span style={{ color: "var(--accent)" }}>📥 正在下载...</span>}
+                    {status.status === "failed" && <span style={{ color: "#ef4444" }}>❌ 下载失败，请重试</span>}
+                    {status.status === "not_downloaded" && <span style={{ color: "var(--text-dim)" }}>未下载</span>}
+                  </div>
+
+                  <div>
+                    {status.status === "downloading" ? (
+                      <button 
+                        onClick={() => handleCancel(m.id)}
+                        style={{ 
+                          padding: "4px 10px", 
+                          background: "none", 
+                          border: "1px solid #ef4444", 
+                          borderRadius: 4, 
+                          color: "#ef4444", 
+                          fontSize: 11, 
+                          cursor: "pointer" 
+                        }}
+                      >
+                        取消
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={() => handleDownload(m.id)}
+                        style={{ 
+                          padding: "4px 12px", 
+                          background: status.status === "completed" ? "none" : "var(--accent)", 
+                          border: status.status === "completed" ? "1px solid var(--border)" : "none", 
+                          borderRadius: 4, 
+                          color: status.status === "completed" ? "var(--text-muted)" : "#fff", 
+                          fontSize: 11, 
+                          fontWeight: 600,
+                          cursor: "pointer" 
+                        }}
+                      >
+                        {status.status === "completed" ? "重新下载" : "下载模型"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function ModelsConfig({ onClose }: { onClose: () => void }) {
@@ -1304,6 +1561,23 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
   const [systemModels, setSystemModels] = useState<{ id: string; name: string; provider: string }[]>([]);
   const [defaultModel, setDefaultModel] = useState<{ provider: string; modelId: string } | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  const handleSyncModels = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch("/api/models?sync=true");
+      if (res.ok) {
+        const d = await res.json();
+        if (d.modelList) setSystemModels(d.modelList);
+        if (d.defaultModel) setDefaultModel(d.defaultModel);
+      }
+    } catch (e) {
+      console.error("Failed to sync models:", e);
+    } finally {
+      setSyncing(false);
+    }
+  }, []);
 
   const loadOAuthProviders = useCallback(() => {
     fetch("/api/auth/providers")
@@ -1460,13 +1734,44 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
       const p = oauthProviders.find((p) => p.id === selection.providerId);
       if (!p) return null;
       const filtered = systemModels.filter((m) => m.provider === p.id);
-      return <OAuthDetail key={p.id} provider={p} onRefresh={loadOAuthProviders} models={filtered} defaultModel={defaultModel} onSetDefault={handleSetDefaultModel} />;
+      return (
+        <OAuthDetail
+          key={p.id}
+          provider={p}
+          onRefresh={() => {
+            loadOAuthProviders();
+            handleSyncModels();
+          }}
+          models={filtered}
+          defaultModel={defaultModel}
+          onSetDefault={handleSetDefaultModel}
+          syncing={syncing}
+          onSync={handleSyncModels}
+        />
+      );
     }
     if (selection.type === "apikey") {
       const p = apiKeyProviders.find((p) => p.id === selection.providerId);
       if (!p) return null;
       const filtered = systemModels.filter((m) => m.provider === p.id);
-      return <ApiKeyDetail key={p.id} provider={p} onRefresh={loadApiKeyProviders} models={filtered} defaultModel={defaultModel} onSetDefault={handleSetDefaultModel} />;
+      return (
+        <ApiKeyDetail
+          key={p.id}
+          provider={p}
+          onRefresh={() => {
+            loadApiKeyProviders();
+            handleSyncModels();
+          }}
+          models={filtered}
+          defaultModel={defaultModel}
+          onSetDefault={handleSetDefaultModel}
+          syncing={syncing}
+          onSync={handleSyncModels}
+        />
+      );
+    }
+    if ((selection as any).type === "local-tts") {
+      return <LocalTtsDetail />;
     }
     if (selection.type === "provider") {
       const provider = config.providers?.[selection.name];
@@ -1618,6 +1923,32 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
                   </div>
                 );
               })}
+              
+              {/* Divider before local models */}
+              <div style={{ margin: "6px 8px", borderTop: "1px solid var(--border)" }} />
+              
+              {/* Local clone models entry */}
+              <div
+                onClick={() => setSelection({ type: "local-tts" } as any)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 7,
+                  padding: "6px 8px",
+                  borderRadius: 5,
+                  cursor: "pointer",
+                  background: selection?.type === ("local-tts" as any) ? "var(--bg-selected)" : "none"
+                }}
+                onMouseEnter={(e) => { if (selection?.type !== ("local-tts" as any)) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                onMouseLeave={(e) => { if (selection?.type !== ("local-tts" as any)) e.currentTarget.style.background = "none"; }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--accent)", flexShrink: 0 }}>
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                <span style={{ fontSize: 12, fontWeight: selection?.type === ("local-tts" as any) ? 600 : 400, color: "var(--text)" }}>本地声音克隆</span>
+              </div>
             </div>
 
             {/* Add provider */}

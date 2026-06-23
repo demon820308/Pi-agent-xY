@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "fs";
 import { basename } from "path";
 import { startRpcSession } from "@/lib/rpc-manager";
 import { getGemById } from "@/lib/gem-xy";
+import { loadDesignMd } from "@/lib/design-loader";
 
 // POST /api/agent/new  body: { cwd: string; type: string; message: string; ... }
 // Spawns a brand-new pi session and immediately sends the first command.
@@ -21,12 +22,13 @@ export async function POST(req: Request) {
     }
 
     // Use a one-time key so startRpcSession's lock doesn't conflict with real session ids
-    const { provider: reqProvider, modelId: reqModelId, toolNames: reqToolNames, thinkingLevel, gemId, ...promptCommand } = command as {
+    const { provider: reqProvider, modelId: reqModelId, toolNames: reqToolNames, thinkingLevel, gemId, designSystem, ...promptCommand } = command as {
       provider?: string;
       modelId?: string;
       toolNames?: string[];
       thinkingLevel?: string;
       gemId?: string;
+      designSystem?: string;
       [key: string]: unknown;
     };
 
@@ -35,6 +37,8 @@ export async function POST(req: Request) {
     let activeModelId = reqModelId;
     let customSystemPrompt: string | undefined;
     let gemInfo: { gemId: string; gemName: string; gemAvatar: string } | undefined;
+    let designSystemMd: string | undefined;
+    let designInfo: { designSystemId: string; designSystemName: string } | undefined;
 
     if (gemId) {
       const gem = getGemById(gemId);
@@ -80,8 +84,22 @@ export async function POST(req: Request) {
       }
     }
 
+    if (designSystem) {
+      const md = loadDesignMd(designSystem);
+      console.log(`[new/route] designSystem="${designSystem}", md loaded: ${md !== null}, md length: ${md?.length ?? 0}`);
+      if (md) {
+        designSystemMd = md;
+        designInfo = {
+          designSystemId: designSystem,
+          designSystemName: designSystem.split(/[-_.]/).map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(" "),
+        };
+      }
+    } else {
+      console.log("[new/route] No designSystem parameter received");
+    }
+
     const tempKey = `__new__${Date.now()}`;
-    const { session, realSessionId } = await startRpcSession(tempKey, "", cwd, activeToolNames, customSystemPrompt, gemInfo);
+    const { session, realSessionId } = await startRpcSession(tempKey, "", cwd, activeToolNames, customSystemPrompt, gemInfo, designSystemMd, designInfo);
 
     // Keep the files-route allowed-roots cache (see app/api/files/[...path]/route.ts)
     // in sync so the new cwd is immediately readable via /api/files. Without this,

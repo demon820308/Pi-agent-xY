@@ -1,6 +1,6 @@
 {
   "name": "@zwbigi/pi-agent-xy",
-  "version": "0.6.36",
+  "version": "0.6.35",
   "author": "demon820308",
   "description": "Pi Agent xY - Web UI for the pi coding agent",
   "main": "electron/main.js",
@@ -13,6 +13,7 @@
   },
   "files": [
     "bin",
+    "design-md",
     ".next",
     "!.next/cache",
     "!.next/dev",
@@ -22,17 +23,19 @@
     "package.json"
   ],
   "scripts": {
-    "dev": "next dev -p 30142 --webpack",
+    "dev": "next dev -p 30144 --webpack",
     "build": "next build --webpack",
-    "start": "next start -p 30142",
+    "start": "next start -p 30144",
     "lint": "eslint .",
     "release": "npm version patch --no-git-tag-version && npm run build && npm publish --registry https://registry.npmjs.org --access public",
     "electron:dev": "concurrently \"next dev -p 3030 --webpack\" \"wait-on http://localhost:3030 && electron .\"",
-    "electron:build": "npm run build && electron-builder"
+    "electron:build": "npm run build && electron-builder",
+    "update-core": "node scripts/update-core.js",
+    "sync-ppt": "node scripts/sync-ppt-master.js"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "^0.75.5",
-    "@earendil-works/pi-coding-agent": "^0.75.5",
+    "@earendil-works/pi-ai": "^0.79.10",
+    "@earendil-works/pi-coding-agent": "^0.79.10",
     "@ffmpeg/core": "^0.12.10",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
@@ -40,9 +43,12 @@
     "@lobehub/icons": "^5.6.0",
     "@types/react-syntax-highlighter": "^15.5.13",
     "chart.js": "^4.5.1",
+    "ffmpeg-static": "^5.3.0",
+    "html2canvas": "^1.4.1",
     "jszip": "^3.10.1",
     "next": "^16.2.7",
     "opencc-js": "^1.3.1",
+    "playwright": "^1.61.0",
     "pptxviewjs": "^1.1.9",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
@@ -69,6 +75,10 @@
   "build": {
     "appId": "com.pi.agent.xy",
     "productName": "Pi Agent xY Desktop",
+    "asar": true,
+    "asarUnpack": [
+      "**/node_modules/ffmpeg-static/**/*"
+    ],
     "directories": {
       "output": "dist"
     },
@@ -112,7 +122,8 @@
       ".next/**/*",
       "!.next/cache/**/*",
       "bin/**/*",
-      "public/**/*"
+      "public/**/*",
+      "design-md/**/*"
     ]
   }
 }

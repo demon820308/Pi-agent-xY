@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useMemo, memo } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vs } from "react-syntax-highlighter/dist/cjs/styles/prism";
@@ -687,6 +687,7 @@ function AssistantMessageView({
         if (globalStored) {
           const settings = JSON.parse(globalStored);
           settings.modelId = mid; // Preserve what model it generated under
+          delete settings.voiceCloneAudioData; // Prune bloated base64 data URL
           history[timeKey] = settings;
           changed = true;
         }
@@ -695,6 +696,9 @@ function AssistantMessageView({
       // If entryId becomes available, ensure it is also linked to the snapshot
       if (entryId && !history[entryId]) {
         if (history[timeKey]) {
+          if (history[timeKey].voiceCloneAudioData) {
+            delete history[timeKey].voiceCloneAudioData;
+          }
           history[entryId] = history[timeKey];
           changed = true;
         } else {
@@ -702,6 +706,7 @@ function AssistantMessageView({
           if (globalStored) {
             const settings = JSON.parse(globalStored);
             settings.modelId = mid;
+            delete settings.voiceCloneAudioData; // Prune bloated base64 data URL
             history[entryId] = settings;
             changed = true;
           }
@@ -709,7 +714,26 @@ function AssistantMessageView({
       }
       
       if (changed) {
-        localStorage.setItem("mimo_history_voice_settings", JSON.stringify(history));
+        try {
+          localStorage.setItem("mimo_history_voice_settings", JSON.stringify(history));
+        } catch (err) {
+          console.warn("[MessageView] Storage quota exceeded when saving historical voice settings. Pruning...");
+          const keys = Object.keys(history);
+          if (keys.length > 30) {
+            const prunedHistory: Record<string, any> = {};
+            const keysToKeep = keys.slice(-30);
+            for (const k of keysToKeep) {
+              prunedHistory[k] = history[k];
+            }
+            try {
+              localStorage.setItem("mimo_history_voice_settings", JSON.stringify(prunedHistory));
+            } catch (_) {
+              localStorage.removeItem("mimo_history_voice_settings");
+            }
+          } else {
+            localStorage.removeItem("mimo_history_voice_settings");
+          }
+        }
         window.dispatchEvent(new Event("mimo_history_voice_settings_changed"));
       }
     } catch (e) {
@@ -1263,6 +1287,12 @@ function TextBlock({ block, onZoomImage, isStreaming, cwd }: { block: TextConten
     <div className="markdown-body">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        urlTransform={(url) => {
+          // Allow file: and open-folder: protocols (used for PPT file links)
+          if (/^(?:file|open-folder):/i.test(url)) return url;
+          // Fall back to default sanitization for other protocols
+          return defaultUrlTransform(url);
+        }}
         components={{
           img({ src, alt }) {
             return (

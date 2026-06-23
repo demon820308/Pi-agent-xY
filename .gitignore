@@ -43,3 +43,21 @@ next-env.d.ts
 
 # electron-builder output
 /dist
+
+# temporary agent session files
+/Temp/
+
+# external reference drops that should not be part of this app workspace
+/open-design/
+
+# custom/synced agent skills and active workspace settings
+/skills-main/
+/.agents/
+
+# external download resources & local scratch files
+/awesome-gpt-image-2-API-and-Prompts-main/
+/ppt-master-main/
+/cookies.txt
+/last_llm_response.txt
+/scratch_test*.js
+/update-core.bat

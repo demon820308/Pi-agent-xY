@@ -127,8 +127,13 @@ export function PipelinePanel({
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', gap: 12,
-      padding: 16, background: 'var(--bg-panel)', borderRadius: 12,
+      padding: 20,
+      background: 'color-mix(in srgb, var(--bg-panel) 92%, transparent)',
+      backdropFilter: 'blur(16px)',
+      WebkitBackdropFilter: 'blur(16px)',
+      borderRadius: 20,
       border: '1px solid var(--border)',
+      boxShadow: '0 12px 32px rgba(0, 0, 0, 0.25)',
     }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

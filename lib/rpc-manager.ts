@@ -4,11 +4,46 @@ import { cacheSessionPath } from "./session-reader";
 import { findModel } from "./model-resolver";
 import type { AgentSessionLike, ToolInfo } from "./pi-types";
 import { isVisionModel } from "./vision";
+import { loadDesignMd, extractKeyTokens } from "./design-loader";
+import { existsSync, readdirSync, statSync, mkdirSync, copyFileSync } from "fs";
+import { join } from "path";
+import { createResourceLoader } from "./skills-util";
+
+function formatTimestamp(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `New_${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
+
+function extractFolderNameFromSessionFile(sessionFile: string): string | null {
+  try {
+    const { readFileSync, existsSync } = require("fs");
+    if (existsSync(sessionFile)) {
+      const content = readFileSync(sessionFile, "utf-8");
+      const firstLine = content.split("\n")[0];
+      if (firstLine) {
+        const header = JSON.parse(firstLine);
+        if (header.cwd) {
+          const normalized = header.cwd.replace(/\\/g, "/");
+          const match = normalized.match(/\/Temp\/([^/]+)$/i);
+          if (match) return match[1];
+        }
+        if (header.timestamp) {
+          const date = new Date(header.timestamp);
+          if (!isNaN(date.getTime())) return formatTimestamp(date);
+        }
+      }
+    }
+  } catch (e) {
+    console.error("[rpc-manager] Failed to extract folder name from session file:", e);
+  }
+  return null;
+}
 
 function injectSystemGuidelines(inner: any) {
   const model = inner.model;
   if (!model) return;
 
+  const sm = inner.sessionManager;
   const supportsVision = isVisionModel(model.provider, model.id);
 
   const visionGuideline = `\n\n## Multimodal Vision Guidance
@@ -16,23 +51,47 @@ function injectSystemGuidelines(inner: any) {
 - You can directly see and analyze this image.
 - DO NOT use the 'read' or 'bash' tools to search for or read files like '用户上传的图片' or scan directory paths unless you are explicitly looking for a specific project file mentioned by path.`;
 
+  const folderName = inner.__sessionFolderName || inner.sessionId;
+  const tempFolder = `Temp/${folderName}`;
   const tempGuideline = `\n\n## Workspace Clutter & Temporary Files Management
-- You MUST store all temporary execution scripts (e.g. search scripts, scratchpads, throwaway files) and their data results/outputs (e.g. text/JSON results, logs, fetched data files) inside the "Temp/" folder at the workspace root directory.
-- For example, if you create a search script, write it to "Temp/search_something.py" instead of "search_something.py".
-- If you write data results, output them to "Temp/result.txt" instead of "result.txt".
-- DO NOT write any temporary, scrap, or execution files directly in the root workspace directory to prevent clutter.`;
+- You MUST store all temporary execution scripts (e.g. search scripts, scratchpads, throwaway files) and their data results/outputs (e.g. HTML/CSS web previews, text/JSON results, logs, fetched data files) inside the "${tempFolder}/" folder at the workspace root directory.
+- For example, if you create a search script or temporary preview page, write it to "${tempFolder}/index.html" or "${tempFolder}/search_something.py" instead of "index.html" or "search_something.py".
+- If you write data results, output them to "${tempFolder}/result.txt" instead of "result.txt".
+- DO NOT write any temporary, scrap, or execution files directly in the root workspace directory to prevent clutter. All files generated during this conversation session MUST be written inside "${tempFolder}/".<!-- workspace-clutter-end -->`;
+
+  // Load design system if configured in the session
+  let dsBlock = "";
+  if (sm && Array.isArray(sm.fileEntries)) {
+    const dsEntry = sm.fileEntries.find((e: any) => e.type === "design_info");
+    if (dsEntry && dsEntry.designSystemId) {
+      try {
+        const designSystemMd = loadDesignMd(dsEntry.designSystemId);
+        if (designSystemMd) {
+          const keyTokens = extractKeyTokens(designSystemMd);
+          dsBlock = `\n\n---\n## Design System — ABSOLUTE MANDATE\nThis session has a locked design system. You MUST apply it to ALL output, NO EXCEPTIONS.\n\n### NON-NEGOTIABLE RULES:\n1. **IGNORE CONTENT BRAND**: Even if the user asks about a different brand (e.g. Xiaomi, Nike, Tesla), you MUST still use THIS design system's colors, fonts, and shapes. The design system defines the VISUAL STYLE, not the content topic.\n2. **COLORS**: Use the EXACT hex values below. Do NOT invent brand-appropriate colors. Do NOT use Tailwind/Bootstrap defaults.\n3. **TYPOGRAPHY**: Use the EXACT font-family and font-weight below. Do NOT substitute.\n4. **BORDER RADIUS**: Use the EXACT pixel values below.\n5. **ZERO DEVIATION**: Every CSS value must trace back to a token below. If a value isn't in the tokens, use the closest token — but NEVER substitute with a framework default or "brand-appropriate" alternative.\n\n${keyTokens}\n\n### Full Design System Reference:\n${designSystemMd}\n\n### PRE-OUTPUT CHECKLIST (mandatory):\n- [ ] All colors are from the token list above — NOT from Tailwind, NOT invented\n- [ ] Font family matches the design system — NOT Inter, NOT system-ui default\n- [ ] Font weight matches — especially thin/300 if specified\n- [ ] Letter-spacing matches\n- [ ] Border-radius matches (pill = specified px)\n---\n`;
+        }
+      } catch (e) {
+        console.error("Failed to load design system inside injectSystemGuidelines:", e);
+      }
+    }
+  }
 
   const stripGuidelines = (prompt: string) => {
     return (prompt || "").replace(/\\n\\n## Multimodal Vision Guidance[\\s\\S]*?mentioned by path\\./g, "")
                          .replace(/\n\n## Multimodal Vision Guidance[\s\S]*?mentioned by path\./g, "")
-                         .replace(/\\n\\n## Workspace Clutter & Temporary Files Management[\\s\\S]*?to prevent clutter\\./g, "")
-                         .replace(/\n\n## Workspace Clutter & Temporary Files Management[\s\S]*?to prevent clutter\./g, "");
+                         .replace(/\\n\\n## Workspace Clutter & Temporary Files Management[\\s\\S]*?<!-- workspace-clutter-end -->/g, "")
+                         .replace(/\n\n## Workspace Clutter & Temporary Files Management[\s\S]*?<!-- workspace-clutter-end -->/g, "")
+                         .replace(/\\n\\n## Workspace Clutter & Temporary Files Management[\\s\\S]*?(?:to prevent clutter|isolated folder)\\./g, "")
+                         .replace(/\n\n## Workspace Clutter & Temporary Files Management[\s\S]*?(?:to prevent clutter|isolated folder)\./g, "")
+                         .replace(/\\n\\n---\\n## Design System — ABSOLUTE MANDATE[\\s\\S]*?---\\n/g, "")
+                         .replace(/\n\n---\n## Design System — ABSOLUTE MANDATE[\s\S]*?---\n/g, "");
   };
 
   let newPromptAdditions = tempGuideline;
   if (supportsVision) {
     newPromptAdditions += visionGuideline;
   }
+  newPromptAdditions += dsBlock;
 
   if (typeof inner._baseSystemPrompt === "string") {
     inner._baseSystemPrompt = stripGuidelines(inner._baseSystemPrompt) + newPromptAdditions;
@@ -54,6 +113,7 @@ function injectSystemGuidelines(inner: any) {
         if (supportsVisionActive) {
           additions += visionGuideline;
         }
+        additions += dsBlock;
         return stripGuidelines(originalPrompt) + additions;
       };
       (wrappedFn as any).__wrapped = true;
@@ -341,7 +401,7 @@ export class AgentSessionWrapper {
 
 declare global {
   var __piSessions: Map<string, AgentSessionWrapper> | undefined;
-  var __piStartLocks: Map<string, Promise<{ session: AgentSessionWrapper; realSessionId: string }>> | undefined;
+  var __piStartLocks: Map<string, Promise<{ session: AgentSessionWrapper; realSessionId: string; folderName: string }>> | undefined;
 }
 
 function getRegistry(): Map<string, AgentSessionWrapper> {
@@ -355,13 +415,31 @@ function getRegistry(): Map<string, AgentSessionWrapper> {
   return globalThis.__piSessions;
 }
 
-function getLocks(): Map<string, Promise<{ session: AgentSessionWrapper; realSessionId: string }>> {
+function getLocks(): Map<string, Promise<{ session: AgentSessionWrapper; realSessionId: string; folderName: string }>> {
   if (!globalThis.__piStartLocks) globalThis.__piStartLocks = new Map();
   return globalThis.__piStartLocks;
 }
 
 export function getRpcSession(sessionId: string): AgentSessionWrapper | undefined {
   return getRegistry().get(sessionId);
+}
+
+function copyDirSync(src: string, dest: string) {
+  if (!existsSync(src)) return;
+  if (!existsSync(dest)) {
+    mkdirSync(dest, { recursive: true });
+  }
+  const entries = readdirSync(src);
+  for (const entry of entries) {
+    const srcPath = join(src, entry);
+    const destPath = join(dest, entry);
+    const stat = statSync(srcPath);
+    if (stat.isDirectory()) {
+      copyDirSync(srcPath, destPath);
+    } else {
+      copyFileSync(srcPath, destPath);
+    }
+  }
 }
 
 /**
@@ -375,13 +453,18 @@ export async function startRpcSession(
   cwd: string,
   toolNames?: string[],
   customSystemPrompt?: string,
-  gemInfo?: { gemId: string; gemName: string; gemAvatar: string }
-): Promise<{ session: AgentSessionWrapper; realSessionId: string }> {
+  gemInfo?: { gemId: string; gemName: string; gemAvatar: string },
+  designSystemMd?: string,
+  designInfo?: { designSystemId: string; designSystemName: string }
+): Promise<{ session: AgentSessionWrapper; realSessionId: string; folderName: string }> {
   const registry = getRegistry();
   const locks = getLocks();
 
   const existing = registry.get(sessionId);
-  if (existing?.isAlive()) return { session: existing, realSessionId: sessionId };
+  if (existing?.isAlive()) {
+    const fName = (existing.inner as any).__sessionFolderName || sessionId;
+    return { session: existing, realSessionId: sessionId, folderName: fName };
+  }
 
   const inflight = locks.get(sessionId);
   if (inflight) return inflight;
@@ -390,9 +473,42 @@ export async function startRpcSession(
     const { SessionManager, getAgentDir } = await import("@earendil-works/pi-coding-agent");
     const agentDir = getAgentDir();
 
+    const folderName = sessionFile 
+      ? (extractFolderNameFromSessionFile(sessionFile) || formatTimestamp(new Date()))
+      : formatTimestamp(new Date());
+
+    const agentCwd = cwd;
+
+    // Auto-initialize built-in skills in workspace if not present or empty
+    const workspaceSkillsDir = join(agentCwd, ".agents", "skills");
+    const sourceSkillsDir = join(process.cwd(), "skills-main", "skills");
+
+    if (existsSync(sourceSkillsDir)) {
+      try {
+        if (!existsSync(workspaceSkillsDir) || readdirSync(workspaceSkillsDir).length === 0) {
+          console.log(`[rpc-manager] Initializing built-in skills from ${sourceSkillsDir} to ${workspaceSkillsDir}`);
+          for (const bucket of ["engineering", "productivity", "misc"]) {
+            const srcBucket = join(sourceSkillsDir, bucket);
+            if (existsSync(srcBucket)) {
+              const entries = readdirSync(srcBucket);
+              for (const entry of entries) {
+                const srcSkill = join(srcBucket, entry);
+                const destSkill = join(workspaceSkillsDir, entry);
+                if (statSync(srcSkill).isDirectory()) {
+                  copyDirSync(srcSkill, destSkill);
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error("[rpc-manager] Failed to auto-initialize built-in skills:", err);
+      }
+    }
+
     const sessionManager = sessionFile
       ? SessionManager.open(sessionFile, undefined)
-      : SessionManager.create(cwd, undefined);
+      : SessionManager.create(agentCwd, undefined);
 
     // We will force-flush the session header after createAgentSession is fully initialized,
     // which prevents duplicate session header writes.
@@ -407,12 +523,17 @@ export async function startRpcSession(
       toolsOption = toolNames.length === 0 ? [] : allCodingToolNames;
     }
 
+    const loader = createResourceLoader(agentCwd, agentDir);
+    await loader.reload();
+
     const { session: inner } = await createAgentSession({
-      cwd,
+      cwd: agentCwd,
       agentDir,
       sessionManager,
+      resourceLoader: loader,
       ...(toolsOption !== undefined ? { tools: toolsOption } : {}),
     });
+    (inner as any).__sessionFolderName = folderName;
 
     // Hijack inner.agent.state.model property to dynamically strip undefined values
     // while preserving and invoking the original descriptor's getter/setter.
@@ -495,6 +616,8 @@ export async function startRpcSession(
       }
     }
 
+
+
     // Wrap inner.agent.streamFn to intercept network error events.
     // When a connection fails (e.g. timeout or DNS error), the JS fetch stream pushes an "error" event
     // with no HTTP status code. The underlying Rust WASM deserializer expects a status code (usize)
@@ -543,7 +666,6 @@ export async function startRpcSession(
 
     const wrapper = new AgentSessionWrapper(inner);
     wrapper.start();
-    injectSystemGuidelines(inner);
 
     // For new sessions, deduplicate any double session headers in fileEntries,
     // then force-flush to ensure the file is written immediately (fixes cold-start fallback).
@@ -600,10 +722,41 @@ export async function startRpcSession(
       }
     }
 
+    // Write design_info entry if this session uses a design system
+    console.log(`[rpc-manager] designInfo:`, designInfo ? JSON.stringify(designInfo) : "undefined");
+    if (designInfo) {
+      try {
+        const dsEntry = {
+          type: "design_info",
+          id: `ds_${Date.now()}`,
+          parentId: null,
+          timestamp: new Date().toISOString(),
+          designSystemId: designInfo.designSystemId,
+          designSystemName: designInfo.designSystemName,
+        };
+        const sm = (inner as any).sessionManager;
+        if (sm) {
+          sm.fileEntries.push(dsEntry);
+          sm.byId.set(dsEntry.id, dsEntry);
+          if (sm.flushed && realSessionFile) {
+            const { appendFileSync } = await import("fs");
+            appendFileSync(realSessionFile, JSON.stringify(dsEntry) + "\n");
+          }
+          console.log(`[rpc-manager] Registered design_info entry for session ${realSessionId}`);
+        }
+      } catch (e) {
+        console.error("[rpc-manager] Failed to write design_info entry:", e);
+      }
+    }
+
+
+
+    injectSystemGuidelines(inner);
+
     wrapper.onDestroy(() => registry.delete(realSessionId));
     registry.set(realSessionId, wrapper);
 
-    return { session: wrapper, realSessionId };
+    return { session: wrapper, realSessionId, folderName };
   })().finally(() => locks.delete(sessionId));
 
   locks.set(sessionId, starting);

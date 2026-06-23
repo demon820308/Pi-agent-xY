@@ -8,11 +8,20 @@ import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
 import { ModelsConfig } from "./ModelsConfig";
 import { SkillsConfig } from "./SkillsConfig";
+import { DeepResearchPanel } from "./DeepResearchPanel";
 import { BranchNavigator } from "./BranchNavigator";
 import { useTheme } from "@/hooks/useTheme";
+import { UserGuideModal } from "./UserGuideModal";
 import { PIPELINE_GEM_DEFAULTS } from "@/lib/pipeline-gem";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
+
+function getWorkspaceCwd(sessionCwd: string | null | undefined): string {
+  if (!sessionCwd) return "";
+  const normalized = sessionCwd.replace(/\\/g, "/");
+  const match = normalized.match(/(.*?)\/Temp\/[^/]+$/i);
+  return match ? match[1] : sessionCwd;
+}
 
 export function AppShell() {
 
@@ -28,7 +37,13 @@ export function AppShell() {
   const [modelsConfigOpen, setModelsConfigOpen] = useState(false);
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [skillsConfigOpen, setSkillsConfigOpen] = useState(false);
+  const [deepResearchActive, setDeepResearchActive] = useState(false);
+  const [deepResearchWide, setDeepResearchWide] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [designSystem, setDesignSystem] = useState<string | null>(null);
+  const [userGuideOpen, setUserGuideOpen] = useState(false);
+  const [designSystemList, setDesignSystemList] = useState<{ id: string; name: string; category: string }[]>([]);
+  const [designToolsActive, setDesignToolsActive] = useState(false);
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
 
@@ -90,6 +105,16 @@ export function AppShell() {
     return () => ro.disconnect();
   }, [activeTopPanel]);
 
+  // Fetch design system list on mount
+  useEffect(() => {
+    fetch("/api/design-systems")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.systems) setDesignSystemList(data.systems);
+      })
+      .catch(() => {});
+  }, []);
+
   // Right panel — file tabs only
   const [fileTabs, setFileTabs] = useState<Tab[]>([]);
   const [activeFileTabId, setActiveFileTabId] = useState<string | null>(null);
@@ -113,7 +138,14 @@ export function AppShell() {
     // Close any session that belongs to a different cwd — it no longer
     // matches the selected project directory.
     setSelectedSession((prev) => {
-      if (prev && prev.cwd !== cwd) return null;
+      if (prev && prev.cwd) {
+        const sessionPath = prev.cwd.replace(/\\/g, "/").toLowerCase();
+        const selectedPath = (cwd || "").replace(/\\/g, "/").toLowerCase();
+        if (sessionPath === selectedPath) return prev;
+        const tempPrefix = selectedPath.endsWith("/") ? `${selectedPath}temp/` : `${selectedPath}/temp/`;
+        if (sessionPath.startsWith(tempPrefix)) return prev;
+        return null;
+      }
       return prev;
     });
     setNewSessionCwd((prev) => {
@@ -131,6 +163,7 @@ export function AppShell() {
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
     setNewSessionCwd(null);
     setSelectedSession(session);
+    setDeepResearchActive(false);
     setActiveGemId(null);
     setPipelineActive(false);
     setSessionKey((k) => k + 1);
@@ -152,6 +185,7 @@ export function AppShell() {
   const handleNewSession = useCallback((_sessionId: string, cwd: string, gemId?: string | null) => {
     setSelectedSession(null);
     setNewSessionCwd(cwd);
+    setDeepResearchActive(false);
     setActiveGemId(gemId ?? null);
     setSessionKey((k) => k + 1);
     setBranchTree([]);
@@ -252,6 +286,25 @@ export function AppShell() {
   // Keep ref in sync for use in effects
   handlePipelineToggleRef.current = handlePipelineToggle
 
+  const isPptActive = activeGemId === "ppt-master-preset" || selectedSession?.gemId === "ppt-master-preset";
+
+  const handlePptToggle = useCallback(() => {
+    if (isPptActive) {
+      setSelectedSession(null);
+      setActiveGemId(null);
+      setNewSessionCwd(null);
+      window.history.replaceState(null, "", "/");
+      return;
+    }
+    const cwd = activeCwd || 'C:\\';
+    const tempId = `ppt-${Date.now()}`;
+    handleNewSession(tempId, cwd, "ppt-master-preset");
+  }, [isPptActive, activeCwd, handleNewSession]);
+
+  const handleDesignToolsToggle = useCallback(() => {
+    setDesignToolsActive((v) => !v);
+  }, []);
+
   const handleInitialRestoreDone = useCallback(() => {
     setInitialSessionRestored(true);
   }, []);
@@ -272,10 +325,11 @@ export function AppShell() {
   }, [selectedSession]);
 
   const handleOpenFile = useCallback((filePath: string, fileName: string) => {
-    const tabId = `file:${filePath}`;
+    const normalizedPath = filePath.replace(/\\/g, "/");
+    const tabId = `file:${normalizedPath}`;
     setFileTabs((prev) => {
       if (prev.find((t) => t.id === tabId)) return prev;
-      return [...prev, { id: tabId, label: fileName, filePath }];
+      return [...prev, { id: tabId, label: fileName, filePath: normalizedPath }];
     });
     setActiveFileTabId(tabId);
     setRightPanelOpen(true);
@@ -312,7 +366,7 @@ export function AppShell() {
         onInitialRestoreDone={handleInitialRestoreDone}
         refreshKey={refreshKey}
         onSessionDeleted={handleSessionDeleted}
-        selectedCwd={selectedSession?.cwd ?? newSessionCwd ?? null}
+        selectedCwd={selectedSession ? getWorkspaceCwd(selectedSession.cwd) : (newSessionCwd ?? null)}
         onCwdChange={handleCwdChange}
         onOpenFile={handleOpenFile}
         explorerRefreshKey={explorerRefreshKey}
@@ -431,6 +485,24 @@ export function AppShell() {
               </svg>
             )}
           </button>
+          {/* PPT Pipeline toggle */}
+          <button
+            onClick={handlePptToggle}
+            title={isPptActive ? 'Close PPT assistant' : 'Open PPT assistant'}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 36, height: 36, padding: 0,
+              background: isPptActive ? 'var(--accent)' : 'none',
+              border: 'none', borderRight: '1px solid var(--border)',
+              color: isPptActive ? '#fff' : 'var(--text-muted)',
+              cursor: 'pointer', flexShrink: 0,
+              transition: 'color 0.12s, background 0.12s', borderRadius: 0,
+            }}
+            onMouseEnter={(e) => { if (!isPptActive) e.currentTarget.style.color = 'var(--text)' }}
+            onMouseLeave={(e) => { if (!isPptActive) e.currentTarget.style.color = 'var(--text-muted)' }}
+          >
+            <span style={{ fontSize: 14 }}>📊</span>
+          </button>
           {/* Pipeline toggle */}
           <button
             onClick={handlePipelineToggle}
@@ -448,6 +520,24 @@ export function AppShell() {
             onMouseLeave={(e) => { if (!pipelineActive) e.currentTarget.style.color = 'var(--text-muted)' }}
           >
             <span style={{ fontSize: 14 }}>🎬</span>
+          </button>
+          {/* Design Tools toggle */}
+          <button
+            onClick={handleDesignToolsToggle}
+            title={designToolsActive ? 'Close visual design tools' : 'Open visual design tools'}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 36, height: 36, padding: 0,
+              background: designToolsActive ? 'var(--accent)' : 'none',
+              border: 'none', borderRight: '1px solid var(--border)',
+              color: designToolsActive ? '#fff' : 'var(--text-muted)',
+              cursor: 'pointer', flexShrink: 0,
+              transition: 'color 0.12s, background 0.12s', borderRadius: 0,
+            }}
+            onMouseEnter={(e) => { if (!designToolsActive) e.currentTarget.style.color = 'var(--text)' }}
+            onMouseLeave={(e) => { if (!designToolsActive) e.currentTarget.style.color = 'var(--text-muted)' }}
+          >
+            <span style={{ fontSize: 14 }}>✂️</span>
           </button>
           <button
             onClick={(e) => {
@@ -664,6 +754,13 @@ export function AppShell() {
               activeGemId={activeGemId}
               pipelineActive={pipelineActive}
               onPipelineDeactivate={() => setPipelineActive(false)}
+              designToolsActive={designToolsActive}
+              onDesignToolsDeactivate={() => setDesignToolsActive(false)}
+              designSystem={designSystem}
+              onDesignSystemChange={setDesignSystem}
+              designSystemList={designSystemList}
+              onOpenDeepResearch={() => setDeepResearchActive(true)}
+              onOpenFile={handleOpenFile}
             />
           ) : showPlaceholder ? (
             activeCwd ? (
@@ -723,6 +820,26 @@ export function AppShell() {
         </div>
       </div>
     </div>
+    {/* User Guide toggle — visible at top-right, next to file panel toggle */}
+    <button
+      onClick={() => setUserGuideOpen(true)}
+      title="User Guide / 使用指南"
+      style={{
+        position: "fixed", top: 0, right: 36, zIndex: 300,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        width: 36, height: 36, padding: 0,
+        background: "var(--bg-panel)", border: "none", borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
+        color: "var(--text-muted)",
+        cursor: "pointer", transition: "color 0.12s",
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+      </svg>
+    </button>
     {/* File panel toggle — always visible at top-right */}
     <button
       onClick={() => setRightPanelOpen((v) => !v)}
@@ -743,8 +860,39 @@ export function AppShell() {
       </svg>
     </button>
     {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
-    {skillsConfigOpen && (activeCwd ?? selectedSession?.cwd ?? newSessionCwd) && (
-      <SkillsConfig cwd={(activeCwd ?? selectedSession?.cwd ?? newSessionCwd)!} onClose={() => setSkillsConfigOpen(false)} />
+    {skillsConfigOpen && (activeCwd ?? (selectedSession ? getWorkspaceCwd(selectedSession.cwd) : null) ?? newSessionCwd) && (
+      <SkillsConfig cwd={(activeCwd ?? (selectedSession ? getWorkspaceCwd(selectedSession.cwd) : null) ?? newSessionCwd)!} onClose={() => setSkillsConfigOpen(false)} />
+    )}
+    {userGuideOpen && <UserGuideModal onClose={() => setUserGuideOpen(false)} />}
+    {deepResearchActive && (
+      <div style={{
+        position: "fixed",
+        top: 0, left: 0, right: 0, bottom: 0,
+        background: "rgba(15, 23, 42, 0.55)",
+        backdropFilter: "blur(16px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        zIndex: 9999, padding: 16,
+      }}>
+        <div style={{
+          width: "90%",
+          maxWidth: deepResearchWide ? 1200 : 680,
+          height: deepResearchWide ? "90%" : "auto",
+          maxHeight: "90%",
+          background: "var(--bg)",
+          borderRadius: 12,
+          border: "1px solid var(--border)",
+          boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 10px 10px -5px rgba(0, 0, 0, 0.2)",
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          transition: "max-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), height 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+        }}>
+          <DeepResearchPanel
+            onClose={() => setDeepResearchActive(false)}
+            onStateChange={(state) => setDeepResearchWide(state.isWide)}
+          />
+        </div>
+      </div>
     )}
     </>
   );

@@ -9,7 +9,12 @@ import { join } from "path";
 export { getAgentDir };
 
 export function getSessionsDir(): string {
-  return `${getAgentDir()}/sessions`;
+  try {
+    return `${getAgentDir()}/sessions`;
+  } catch {
+    const userHome = process.env.USERPROFILE || process.env.HOMEPATH || process.env.HOME || "";
+    return join(userHome, ".pi", "agent", "sessions");
+  }
 }
 
 /**
@@ -29,6 +34,30 @@ function readGemInfoFromFile(filePath: string): { gemId?: string; gemName?: stri
             gemId: entry.gemId,
             gemName: entry.gemName,
             gemAvatar: entry.gemAvatar,
+          };
+        }
+      } catch {
+        // Skip malformed lines
+      }
+    }
+  } catch {
+    // File read error - ignore
+  }
+  return {};
+}
+
+function readDesignInfoFromFile(filePath: string): { designSystemId?: string; designSystemName?: string } {
+  try {
+    const content = readFileSync(filePath, "utf-8");
+    const lines = content.split("\n").slice(0, 20);
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const entry = JSON.parse(line);
+        if (entry.type === "design_info" && entry.designSystemId) {
+          return {
+            designSystemId: entry.designSystemId,
+            designSystemName: entry.designSystemName,
           };
         }
       } catch {
@@ -67,6 +96,7 @@ export async function listAllSessions(): Promise<SessionInfo[]> {
 
               // Read gem info from first 20 lines
               const gemInfo = readGemInfoFromFile(filePath);
+              const designInfo = readDesignInfoFromFile(filePath);
 
               // Extract first user message for display
               const lines = content.split("\n");
@@ -98,6 +128,7 @@ export async function listAllSessions(): Promise<SessionInfo[]> {
                 parentSessionId: header.parentSession ? undefined : undefined, // Will be resolved later
                 locked: false,
                 ...gemInfo,
+                ...designInfo,
               });
             } catch {
               // Skip invalid session files
@@ -118,6 +149,7 @@ export async function listAllSessions(): Promise<SessionInfo[]> {
 
     for (const s of defaultSessions) {
       const gemInfo = readGemInfoFromFile(s.path);
+      const designInfo = readDesignInfoFromFile(s.path);
       allSessions.push({
         path: s.path,
         id: s.id,
@@ -130,6 +162,7 @@ export async function listAllSessions(): Promise<SessionInfo[]> {
         parentSessionId: s.parentSessionPath ? pathToId.get(s.parentSessionPath) : undefined,
         locked: lockedIds.has(s.id),
         ...gemInfo,
+        ...designInfo,
       });
     }
   }
@@ -176,7 +209,30 @@ export async function resolveSessionPath(sessionId: string): Promise<string | nu
 
   // Cache miss: scan all sessions to populate cache, then retry
   await listAllSessions();
-  return getPathCache().get(sessionId) ?? null;
+  const scanned = getPathCache().get(sessionId);
+  if (scanned) return scanned;
+
+  // Direct filename fallback: look for *_${sessionId}.jsonl directly
+  const sessionsDir = getSessionsDir();
+  try {
+    const entries = readdirSync(sessionsDir);
+    for (const entry of entries) {
+      const fullPath = join(sessionsDir, entry);
+      if (statSync(fullPath).isDirectory()) {
+        const files = readdirSync(fullPath);
+        const match = files.find((f: string) => f.endsWith(`_${sessionId}.jsonl`));
+        if (match) {
+          const matchedPath = join(fullPath, match);
+          cacheSessionPath(sessionId, matchedPath);
+          return matchedPath;
+        }
+      }
+    }
+  } catch {
+    // Ignore fallback errors
+  }
+
+  return null;
 }
 
 export function cacheSessionPath(sessionId: string, filePath: string): void {

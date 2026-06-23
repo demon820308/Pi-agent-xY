@@ -1,0 +1,369 @@
+#!/usr/bin/env python3
+"""
+Accumulate traffic history and generate a live dashboard.
+Runs as a post-processing step after traffic-to-badge collects data.
+Merges today's paths/referrers snapshot into growing history files,
+then generates a self-contained HTML dashboard from all traffic data.
+"""
+
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+
+REPO_SLUG = "system_prompts_leaks"
+TRAFFIC_DIR = f"traffic-{REPO_SLUG}"
+HISTORY_REFERRERS = "traffic_referrers_history.json"
+HISTORY_PATHS = "traffic_paths_history.json"
+
+def load_json(path):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+def fetch_from_branch(publish_dir, filename):
+    full = f"{TRAFFIC_DIR}/{filename}"
+    try:
+        raw = subprocess.check_output(
+            ["git", "show", f"origin/traffic:{full}"],
+            stderr=subprocess.DEVNULL,
+        )
+        return json.loads(raw)
+    except (subprocess.CalledProcessError, json.JSONDecodeError):
+        return None
+
+def accumulate(publish_dir):
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    data_dir = os.path.join(publish_dir, TRAFFIC_DIR)
+
+    referrers = load_json(os.path.join(data_dir, "traffic_referrers.json"))
+    paths = load_json(os.path.join(data_dir, "traffic_paths.json"))
+
+    ref_history = (
+        load_json(os.path.join(data_dir, HISTORY_REFERRERS))
+        or fetch_from_branch(publish_dir, HISTORY_REFERRERS)
+        or []
+    )
+    path_history = (
+        load_json(os.path.join(data_dir, HISTORY_PATHS))
+        or fetch_from_branch(publish_dir, HISTORY_PATHS)
+        or []
+    )
+
+    existing_ref_dates = {e["date"] for e in ref_history}
+    existing_path_dates = {e["date"] for e in path_history}
+
+    if referrers and today not in existing_ref_dates:
+        ref_history.append({"date": today, "referrers": referrers})
+        ref_history.sort(key=lambda x: x["date"])
+
+    if paths and today not in existing_path_dates:
+        path_history.append({"date": today, "paths": paths})
+        path_history.sort(key=lambda x: x["date"])
+
+    with open(os.path.join(data_dir, HISTORY_REFERRERS), "w") as f:
+        json.dump(ref_history, f, separators=(",", ":"))
+
+    with open(os.path.join(data_dir, HISTORY_PATHS), "w") as f:
+        json.dump(path_history, f, separators=(",", ":"))
+
+    print(f"Accumulated: {len(ref_history)} referrer snapshots, {len(path_history)} path snapshots")
+    return ref_history, path_history
+
+def build_dashboard(publish_dir, ref_history, path_history):
+    data_dir = os.path.join(publish_dir, TRAFFIC_DIR)
+    views = load_json(os.path.join(data_dir, "traffic_views.json"))
+    clones = load_json(os.path.join(data_dir, "traffic_clones.json"))
+
+    if not views or not clones:
+        print("Missing views/clones data, skipping dashboard")
+        return
+
+    embedded = json.dumps({
+        "views": views,
+        "clones": clones,
+        "referrer_series": ref_history,
+        "paths_series": path_history,
+    }, separators=(",", ":"))
+
+    html = DASHBOARD_TEMPLATE.replace("__DATA_PLACEHOLDER__", embedded)
+
+    out_path = os.path.join(publish_dir, TRAFFIC_DIR, "dashboard.html")
+    with open(out_path, "w") as f:
+        f.write(html)
+    print(f"Dashboard written to {out_path}")
+
+    redirect = """<!DOCTYPE html><html><head>
+<meta charset="UTF-8">
+<meta http-equiv="refresh" content="0;url=https://github.com/asgeirtj/system_prompts_leaks">
+<link rel="canonical" href="https://github.com/asgeirtj/system_prompts_leaks">
+<meta property="og:title" content="System Prompts Leaks">
+<meta property="og:description" content="Extracted system prompts from Anthropic, OpenAI, Google, xAI, and more. Updated regularly.">
+<meta property="og:image" content="https://opengraph.githubassets.com/1/asgeirtj/system_prompts_leaks">
+<meta property="og:url" content="https://github.com/asgeirtj/system_prompts_leaks">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<title>System Prompts Leaks</title>
+</head></html>"""
+    with open(os.path.join(publish_dir, "index.html"), "w") as f:
+        f.write(redirect)
+    print("Root redirect written")
+
+DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>system_prompts_leaks — Traffic Dashboard</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='1' x2='1' y2='0'%3E%3Cstop offset='0%25' stop-color='%236366f1'/%3E%3Cstop offset='100%25' stop-color='%23818cf8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Cpath d='M16 44 L26 32 L34 38 L48 20' stroke='%23fff' stroke-width='4' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3Ccircle cx='48' cy='20' r='4' fill='%23fbbf24'/%3E%3C/svg%3E">
+<script src="https://cdn.jsdelivr.net/npm/apexcharts@4/dist/apexcharts.min.js"></script>
+<style>
+  :root { --bg:#fafafa;--card:#fff;--border:#e5e7eb;--text:#111827;--text2:#6b7280;--shadow:0 1px 3px rgba(0,0,0,0.06); }
+  @media(prefers-color-scheme:dark){ :root { --bg:#0b0f19;--card:#141927;--border:#1e293b;--text:#e2e8f0;--text2:#94a3b8;--shadow:0 1px 3px rgba(0,0,0,0.4); } }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);padding:20px 24px;max-width:1280px;margin:0 auto}
+  .header{display:flex;align-items:baseline;gap:12px;margin-bottom:6px}
+  h1{font-size:1.4rem;font-weight:800;letter-spacing:-0.02em}
+  .subtitle{color:var(--text2);font-size:.8rem;margin-bottom:20px}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px}
+  .stat{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:var(--shadow)}
+  .stat-label{font-size:.65rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text2);font-weight:600}
+  .stat-val{font-size:1.6rem;font-weight:800;margin:2px 0;letter-spacing:-0.02em}
+  .stat-sub{font-size:.75rem;color:var(--text2)}
+  .trend-up{color:#10b981}.trend-down{color:#ef4444}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px 16px 8px;margin-bottom:16px;box-shadow:var(--shadow)}
+  .card-title{font-size:.85rem;font-weight:700;margin-bottom:8px;letter-spacing:-0.01em}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:768px){.grid-2{grid-template-columns:1fr}}
+  .section{font-size:.9rem;font-weight:700;margin:24px 0 10px;letter-spacing:-0.01em}
+  table{width:100%;border-collapse:collapse;font-size:.8rem}
+  th{text-align:left;padding:6px 10px;border-bottom:2px solid var(--border);color:var(--text2);font-weight:700;font-size:.65rem;text-transform:uppercase;letter-spacing:.04em}
+  td{padding:6px 10px;border-bottom:1px solid var(--border)}
+  tr:last-child td{border-bottom:none}
+  .mono{font-family:'SF Mono','Fira Code','Cascadia Code',monospace;font-size:.75rem}
+  .bar-wrap{position:relative}
+  .bar-fill{position:absolute;left:0;top:2px;bottom:2px;border-radius:3px;opacity:.12}
+  .badge{display:inline-block;font-size:.6rem;padding:1px 5px;border-radius:4px;font-weight:700;margin-left:4px}
+  .badge-up{background:rgba(16,185,129,.15);color:#10b981}
+  .badge-down{background:rgba(239,68,68,.15);color:#ef4444}
+  .badge-new{background:rgba(99,102,241,.15);color:#6366f1}
+  .stat-since{font-size:.6rem;margin-top:6px;padding:2px 7px;background:rgba(99,102,241,.08);color:#6366f1;border-radius:4px;display:inline-block;font-weight:600;letter-spacing:.02em}
+  @media(prefers-color-scheme:dark){.stat-since{background:rgba(99,102,241,.15);color:#818cf8}}
+  .drill-info{text-align:center;font-size:.75rem;color:var(--text2);margin-top:4px}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>system_prompts_leaks</h1>
+</div>
+<p class="subtitle">Traffic dashboard — auto-updated daily from the <code>traffic</code> branch</p>
+<div class="stats" id="stats"></div>
+<div class="card"><div class="card-title">Daily Views</div><div id="viewsChart"></div><p class="drill-info">Drag to zoom — click Reset to restore</p></div>
+<div class="grid-2">
+  <div class="card"><div class="card-title">Top Pages (top 20 — peak 14-day count across all snapshots)</div><table id="pathsTable"></table></div>
+  <div class="card"><div class="card-title">Top Referrers (top 20 — peak 14-day count across all snapshots)</div><table id="refsTable"></table></div>
+</div>
+<p class="section">All Referrers — peak 14-day count per source across all snapshots</p>
+<div class="card"><div id="allRefsChart"></div></div>
+<p class="section">Referrer Trends</p>
+<div class="card"><div id="refTrendChart"></div></div>
+<p class="section">Page Trends</p>
+<div class="card"><div id="pathTrendChart"></div></div>
+<p class="section">Day Detail</p>
+<div class="card"><div class="card-title" id="dayDetailTitle">Click a day on the views chart to see that day's breakdown</div><div id="dayDetail" style="min-height:60px"></div></div>
+<p class="section">Daily Clones</p>
+<div class="card"><div id="clonesChart"></div></div>
+
+<script>
+const DATA = __DATA_PLACEHOLDER__;
+const fmt = n => n != null ? n.toLocaleString() : '-';
+const colors = ['#6366f1','#f59e0b','#10b981','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316','#06b6d4','#84cc16','#a855f7','#fb923c','#2dd4bf','#f43f5e','#facc15','#38bdf8'];
+
+let isDark = window.matchMedia('(prefers-color-scheme:dark)').matches;
+function apexTheme() { return isDark ? 'dark' : 'light'; }
+
+function shortenPath(p) {
+  const b = p.replace('/asgeirtj/system_prompts_leaks', '');
+  if (!b) return 'Overview';
+  if (b === '/tree/main') return '/ (root)';
+  if (b.startsWith('/tree/main/')) return b.replace('/tree/main/', '') + '/';
+  if (b.startsWith('/blob/main/')) return b.replace('/blob/main/', '');
+  return b;
+}
+
+const views = DATA.views, clones = DATA.clones;
+const vDays = views.views.sort((a,b) => a.timestamp.localeCompare(b.timestamp));
+const cDays = clones.clones.sort((a,b) => a.timestamp.localeCompare(b.timestamp));
+const peakView = vDays.reduce((a,b) => b.count > a.count ? b : a);
+const avgViews = Math.round(views.count / vDays.length);
+const last7 = vDays.slice(-7).reduce((s,d) => s + d.count, 0);
+const prev7 = vDays.slice(-14,-7).reduce((s,d) => s + d.count, 0);
+const trend = prev7 ? Math.round((last7 - prev7) / prev7 * 100) : 0;
+const trendCls = trend >= 0 ? 'trend-up' : 'trend-down';
+const sinceStart = new Date(vDays[0].timestamp);
+const sinceFmt = sinceStart.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+const dayCount = Math.round((Date.now() - sinceStart.getTime()) / 86400000);
+
+document.getElementById('stats').innerHTML = [
+  { l:'Total Views', v:fmt(views.count), s:fmt(views.uniques)+' unique', t:`since ${sinceFmt} · ${dayCount}d` },
+  { l:'Total Clones', v:fmt(clones.count), s:fmt(clones.uniques)+' unique' },
+  { l:'Daily Avg', v:fmt(avgViews), s:fmt(Math.round(clones.count/cDays.length))+' clones' },
+  { l:'Peak Day', v:fmt(peakView.count), s:peakView.timestamp.slice(0,10) },
+  { l:'7-Day Trend', v:`<span class="${trendCls}">${trend>=0?'+':''}${trend}%</span>`, s:fmt(last7)+' vs '+fmt(prev7) },
+].map(s=>`<div class="stat"><div class="stat-label">${s.l}</div><div class="stat-val">${s.v}</div><div class="stat-sub">${s.s}</div>${s.t?`<div class="stat-since">${s.t}</div>`:''}</div>`).join('');
+
+const baseOpts = { chart:{fontFamily:'Inter,-apple-system,system-ui,sans-serif',background:'transparent',foreColor:isDark?'#94a3b8':'#6b7280',toolbar:{show:true,tools:{download:true,selection:true,zoom:true,zoomin:false,zoomout:false,pan:false,reset:true}}}, theme:{mode:apexTheme()}, grid:{borderColor:isDark?'#1e293b':'#e5e7eb',strokeDashArray:3}, tooltip:{theme:apexTheme()}, };
+
+new ApexCharts(document.getElementById('viewsChart'), {
+  ...baseOpts,
+  chart:{...baseOpts.chart, type:'area', height:320, id:'views',
+    events:{ markerClick:function(e,ctx,cfg){ showDayDetail(vDays[cfg.dataPointIndex]?.timestamp.slice(0,10)); } },
+    zoom:{enabled:true,type:'x',autoScaleYaxis:true},
+  },
+  series:[
+    {name:'Views', data:vDays.map(d=>[new Date(d.timestamp).getTime(), d.count])},
+    {name:'Unique', data:vDays.map(d=>[new Date(d.timestamp).getTime(), d.uniques])},
+  ],
+  colors:['#6366f1','#f59e0b'],
+  fill:{type:'gradient',gradient:{shadeIntensity:1,opacityFrom:0.4,opacityTo:0.05,stops:[0,95]}},
+  stroke:{curve:'smooth',width:2.5},
+  xaxis:{type:'datetime',labels:{datetimeUTC:false}},
+  yaxis:{labels:{formatter:v=>v>=1000?(v/1000).toFixed(1)+'k':v}},
+  dataLabels:{enabled:false},
+  markers:{size:0,hover:{size:5}},
+  legend:{position:'top',horizontalAlign:'left',fontSize:'12px'},
+}).render();
+
+new ApexCharts(document.getElementById('clonesChart'), {
+  ...baseOpts,
+  chart:{...baseOpts.chart, type:'bar', height:240, stacked:false},
+  series:[
+    {name:'Clones', data:cDays.map(d=>[new Date(d.timestamp).getTime(), d.count])},
+    {name:'Unique', data:cDays.map(d=>[new Date(d.timestamp).getTime(), d.uniques])},
+  ],
+  colors:['#6366f1','#f59e0b'],
+  plotOptions:{bar:{borderRadius:3,columnWidth:'60%'}},
+  xaxis:{type:'datetime',labels:{datetimeUTC:false}},
+  yaxis:{labels:{formatter:v=>v>=1000?(v/1000).toFixed(1)+'k':v}},
+  dataLabels:{enabled:false},
+  legend:{position:'top',horizontalAlign:'left',fontSize:'12px'},
+}).render();
+
+const latestRefs = DATA.referrer_series.length ? DATA.referrer_series[DATA.referrer_series.length-1].referrers : [];
+const prevRefs = DATA.referrer_series.length > 7 ? DATA.referrer_series[DATA.referrer_series.length-8].referrers : null;
+
+// GitHub's API only returns 10 paths/referrers per snapshot, so aggregate the
+// peak 14-day count per source across all snapshots to surface up to 20.
+const allPathsMap = {};
+DATA.paths_series.forEach(s=>s.paths.forEach(p=>{ if(!allPathsMap[p.path]||p.count>allPathsMap[p.path].count) allPathsMap[p.path]={count:p.count,uniques:p.uniques,peak:s.date}; }));
+const allPaths = Object.entries(allPathsMap).sort((a,b)=>b[1].count-a[1].count);
+
+const allRefsMap = {};
+DATA.referrer_series.forEach(s=>s.referrers.forEach(r=>{ if(!allRefsMap[r.referrer]||r.count>allRefsMap[r.referrer].count) allRefsMap[r.referrer]={count:r.count,uniques:r.uniques,peak:s.date}; }));
+const allRefs = Object.entries(allRefsMap).sort((a,b)=>b[1].count-a[1].count);
+
+const topPaths = allPaths.slice(0,20);
+document.getElementById('pathsTable').innerHTML = '<thead><tr><th>#</th><th>Page</th><th>Peak Views</th><th>Unique</th></tr></thead><tbody>'+
+  topPaths.map(([path,d],i)=>{
+    const w = Math.round(d.count/(topPaths[0]?.[1].count||1)*100);
+    return `<tr><td style="color:var(--text2)">${i+1}</td><td class="bar-wrap"><div class="bar-fill" style="width:${w}%;background:${colors[i%colors.length]}"></div><span class="mono">${shortenPath(path)}</span></td><td>${fmt(d.count)}</td><td>${fmt(d.uniques)}</td></tr>`;
+  }).join('')+'</tbody>';
+
+const topRefs = allRefs.slice(0,20);
+document.getElementById('refsTable').innerHTML = '<thead><tr><th>#</th><th>Referrer</th><th>Peak Views</th><th>Unique</th></tr></thead><tbody>'+
+  topRefs.map(([ref,d],i)=>{
+    const w = Math.round(d.count/(topRefs[0]?.[1].count||1)*100);
+    let badge = '';
+    if(prevRefs){ const cur=latestRefs.find(x=>x.referrer===ref); const p=prevRefs.find(x=>x.referrer===ref); if(cur&&p){const delta=Math.round((cur.count-p.count)/p.count*100); if(delta!==0) badge=`<span class="badge ${delta>0?'badge-up':'badge-down'}">${delta>0?'+':''}${delta}%</span>`;}else if(cur&&!p){badge='<span class="badge badge-new">new</span>';}}
+    return `<tr><td style="color:var(--text2)">${i+1}</td><td class="bar-wrap"><div class="bar-fill" style="width:${w}%;background:${colors[i%colors.length]}"></div>${ref}${badge}</td><td>${fmt(d.count)}</td><td>${fmt(d.uniques)}</td></tr>`;
+  }).join('')+'</tbody>';
+
+new ApexCharts(document.getElementById('allRefsChart'), {
+  ...baseOpts,
+  chart:{...baseOpts.chart, type:'bar', height:Math.max(250, allRefs.length*32)},
+  series:[{name:'Peak 14-day views',data:allRefs.map(([,d])=>d.count)},{name:'Unique',data:allRefs.map(([,d])=>d.uniques)}],
+  colors:['#6366f1','#f59e0b'],
+  plotOptions:{bar:{horizontal:true,borderRadius:4,barHeight:'65%',dataLabels:{position:'top'}}},
+  xaxis:{labels:{formatter:v=>v>=1000?(v/1000).toFixed(0)+'k':v}},
+  yaxis:{labels:{style:{fontSize:'11px'}},categories:allRefs.map(([n])=>n)},
+  dataLabels:{enabled:false},
+  tooltip:{y:{formatter:v=>fmt(v)}},
+  legend:{position:'top',horizontalAlign:'left',fontSize:'12px'},
+}).render();
+
+const allRefNames = new Set();
+DATA.referrer_series.forEach(s=>s.referrers.forEach(r=>allRefNames.add(r.referrer)));
+const topRefNames = [...allRefNames].map(n=>({n,c:(latestRefs.find(r=>r.referrer===n)||{count:0}).count})).sort((a,b)=>b.c-a.c).slice(0,8).map(x=>x.n);
+
+new ApexCharts(document.getElementById('refTrendChart'), {
+  ...baseOpts,
+  chart:{...baseOpts.chart, type:'line', height:320, zoom:{enabled:true,type:'x'}},
+  series:topRefNames.map((name,i)=>({
+    name, data:DATA.referrer_series.map(s=>{const r=s.referrers.find(x=>x.referrer===name); return [new Date(s.date).getTime(), r?r.count:null];})
+  })),
+  colors:colors.slice(0,8),
+  stroke:{curve:'smooth',width:2},
+  xaxis:{type:'datetime'},
+  yaxis:{labels:{formatter:v=>v>=1000?(v/1000).toFixed(1)+'k':v}},
+  dataLabels:{enabled:false},
+  markers:{size:0,hover:{size:4}},
+  legend:{position:'top',fontSize:'11px'},
+}).render();
+
+const allPathNames = new Set();
+DATA.paths_series.forEach(s=>s.paths.forEach(p=>allPathNames.add(p.path)));
+const topPathNames = [...allPathNames].map(n=>({n,c:(allPathsMap[n]||{count:0}).count})).sort((a,b)=>b.c-a.c).slice(0,6).map(x=>x.n);
+
+new ApexCharts(document.getElementById('pathTrendChart'), {
+  ...baseOpts,
+  chart:{...baseOpts.chart, type:'line', height:320, zoom:{enabled:true,type:'x'}},
+  series:topPathNames.map((name,i)=>({
+    name:shortenPath(name), data:DATA.paths_series.map(s=>{const p=s.paths.find(x=>x.path===name); return [new Date(s.date).getTime(), p?p.count:null];})
+  })),
+  colors:colors.slice(0,6),
+  stroke:{curve:'smooth',width:2},
+  xaxis:{type:'datetime'},
+  yaxis:{labels:{formatter:v=>v>=1000?(v/1000).toFixed(1)+'k':v}},
+  dataLabels:{enabled:false},
+  markers:{size:0,hover:{size:4}},
+  legend:{position:'top',fontSize:'11px'},
+}).render();
+
+function showDayDetail(date) {
+  if (!date) return;
+  const el = document.getElementById('dayDetail');
+  const titleEl = document.getElementById('dayDetailTitle');
+  const day = vDays.find(d=>d.timestamp.startsWith(date));
+  const clone = cDays.find(d=>d.timestamp.startsWith(date));
+  const snap = DATA.referrer_series.find(s=>s.date===date);
+  const pathSnap = DATA.paths_series.find(s=>s.date===date);
+  titleEl.textContent = date;
+  let html = '<div class="grid-2" style="gap:12px">';
+  html += '<div><strong style="font-size:.75rem">Views:</strong> '+(day?fmt(day.count)+' ('+fmt(day.uniques)+' unique)':'no data')+'<br><strong style="font-size:.75rem">Clones:</strong> '+(clone?fmt(clone.count)+' ('+fmt(clone.uniques)+' unique)':'no data')+'</div>';
+  if (snap) {
+    html += '<div><strong style="font-size:.75rem">Referrers (14-day window):</strong><br>';
+    snap.referrers.slice(0,5).forEach(r=>{ html += `<span class="mono" style="font-size:.7rem">${r.referrer}: ${fmt(r.count)}</span><br>`; });
+    html += '</div>';
+  }
+  html += '</div>';
+  if (pathSnap) {
+    html += '<div style="margin-top:8px"><strong style="font-size:.75rem">Top pages (14-day window):</strong>';
+    html += '<table style="margin-top:4px"><thead><tr><th>Page</th><th>Views</th></tr></thead><tbody>';
+    pathSnap.paths.slice(0,5).forEach(p=>{ html += `<tr><td class="mono">${shortenPath(p.path)}</td><td>${fmt(p.count)}</td></tr>`; });
+    html += '</tbody></table></div>';
+  }
+  el.innerHTML = html;
+  el.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+</script>
+</body>
+</html>"""
+
+if __name__ == "__main__":
+    publish_dir = sys.argv[1]
+    print(f"Processing traffic data in {publish_dir}")
+    ref_history, path_history = accumulate(publish_dir)
+    build_dashboard(publish_dir, ref_history, path_history)

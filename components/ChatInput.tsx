@@ -6,7 +6,8 @@ import { isTtsModel, isVoiceDesignModel, isVoiceCloneModel, isBaseTtsModel } fro
 import { encodeFilePathForApi, joinFilePath } from "@/lib/file-paths";
 import { TtsPanel } from "./TtsPanel";
 import { useVideoScript } from "@/hooks/useVideoScript";
-import { isVideoFile } from "@/lib/video-audio-extractor";
+import { isVideoFile } from "@/lib/video-file";
+import { PROMPT_PRESETS, type PromptPreset } from "@/lib/prompt-presets";
 
 export interface AttachedImage {
   data: string;   // base64, no prefix
@@ -18,6 +19,41 @@ interface ModelOption {
   provider: string;
   modelId: string;
   name: string;
+}
+
+interface PromptArg {
+  key: string;
+  name: string;
+  defaultValue: string;
+}
+
+function parsePlaceholders(text: string): PromptArg[] {
+  const args: PromptArg[] = [];
+  const seen = new Set<string>();
+  const braceRegex = /\{argument name="([^"]+)"(?: default="([^"]*)")?\}/g;
+  let match;
+  while ((match = braceRegex.exec(text)) !== null) {
+    if (!seen.has(match[0])) {
+      seen.add(match[0]);
+      args.push({ key: match[0], name: match[1], defaultValue: match[2] ?? "" });
+    }
+  }
+  const bracketRegex = /\[([A-Z\u4e00-\u9fff][A-Z0-9_\u4e00-\u9fff ]{1,30})\]/g;
+  while ((match = bracketRegex.exec(text)) !== null) {
+    if (!seen.has(match[0])) {
+      seen.add(match[0]);
+      args.push({ key: match[0], name: match[1], defaultValue: "" });
+    }
+  }
+  return args;
+}
+
+function replacePlaceholders(text: string, values: Record<string, string>): string {
+  let updated = text;
+  for (const [key, val] of Object.entries(values)) {
+    updated = updated.replaceAll(key, val);
+  }
+  return updated;
 }
 
 interface Props {
@@ -45,6 +81,13 @@ interface Props {
   onSoundToggle?: () => void;
   cwd?: string | null;
   onOpenCookieConfig?: () => void;
+  designSystem?: string | null;
+  onDesignSystemChange?: (id: string | null) => void;
+  designSystemList?: { id: string; name: string; category: string }[];
+
+  isNew?: boolean;
+  sessionId?: string | null;
+  onOpenDeepResearch?: () => void;
 }
 
 export interface ChatInputHandle {
@@ -76,7 +119,12 @@ function parseDescriptionToJSON(text: string): string {
   let background = "";
   let lighting = "";
   let style = "";
-  // Split by line to perform structured extraction
+  let layout = "";
+  let sceneElements = "";
+  let textTreatment = "";
+  let mood = "";
+  let colorPalette = "";
+  let aspectRatio = "";
   const lines = text.split(/\r?\n/);
   let inFinalPromptSection = false;
   const finalPromptLines: string[] = [];
@@ -85,7 +133,6 @@ function parseDescriptionToJSON(text: string): string {
     const trimmed = line.trim();
     if (!trimmed) continue;
 
-    // Check if we hit the final prompt section header
     if (trimmed.includes("最终直调用") || trimmed.includes("【最终直调用 Prompt】")) {
       inFinalPromptSection = true;
       continue;
@@ -98,57 +145,47 @@ function parseDescriptionToJSON(text: string): string {
     }
 
     const lower = trimmed.toLowerCase();
-    
-    // Core Subject
+
     if (lower.includes("core_subject") || trimmed.includes("核心主体")) {
       const parts = trimmed.split(/[:：]/);
-      if (parts.length > 1) {
-        coreSubject = parts.slice(1).join(":").trim();
-      }
-    }
-    // Clothing
-    else if (lower.includes("clothing") || trimmed.includes("服装/材质") || trimmed.includes("服装") || trimmed.includes("材质")) {
-      if (!lower.includes("lighting") && !trimmed.includes("光照")) {
-        const parts = trimmed.split(/[:：]/);
-        if (parts.length > 1) {
-          clothing = parts.slice(1).join(":").trim();
-        }
-      }
-    }
-    // Location
-    else if (lower.includes("location") || trimmed.includes("具体地点")) {
+      if (parts.length > 1) coreSubject = parts.slice(1).join(":").trim();
+    } else if ((lower.includes("clothing") || trimmed.includes("服装/材质") || trimmed.includes("服装") || trimmed.includes("材质")) && !lower.includes("lighting") && !trimmed.includes("光照")) {
       const parts = trimmed.split(/[:：]/);
-      if (parts.length > 1) {
-        location = parts.slice(1).join(":").trim();
-      }
-    }
-    // Background
-    else if (lower.includes("background") || trimmed.includes("画面背景")) {
+      if (parts.length > 1) clothing = parts.slice(1).join(":").trim();
+    } else if (lower.includes("location") || trimmed.includes("具体地点")) {
+      const parts = trimmed.split(/[:：]/);
+      if (parts.length > 1) location = parts.slice(1).join(":").trim();
+    } else if (lower.includes("background") || trimmed.includes("画面背景")) {
       const parts = trimmed.split(/[:::：]/);
-      if (parts.length > 1) {
-        background = parts.slice(1).join(":").trim();
-      }
-    }
-    // Lighting
-    else if (lower.includes("lighting") || trimmed.includes("光照与色彩") || trimmed.includes("光照") || trimmed.includes("色彩")) {
+      if (parts.length > 1) background = parts.slice(1).join(":").trim();
+    } else if (lower.includes("lighting") || trimmed.includes("光照与色彩") || trimmed.includes("光照") || trimmed.includes("色彩")) {
       const parts = trimmed.split(/[:：]/);
-      if (parts.length > 1) {
-        lighting = parts.slice(1).join(":").trim();
-      }
-    }
-    // Style
-    else if (lower.includes("style") || trimmed.includes("艺术风格")) {
+      if (parts.length > 1) lighting = parts.slice(1).join(":").trim();
+    } else if (lower.includes("style") || trimmed.includes("艺术风格")) {
       const parts = trimmed.split(/[:：]/);
-      if (parts.length > 1) {
-        style = parts.slice(1).join(":").trim();
-      }
+      if (parts.length > 1) style = parts.slice(1).join(":").trim();
+    } else if (lower.includes("layout") || trimmed.includes("画面布局")) {
+      const parts = trimmed.split(/[:：]/);
+      if (parts.length > 1) layout = parts.slice(1).join(":").trim();
+    } else if (lower.includes("scene_elements") || trimmed.includes("场景元素")) {
+      const parts = trimmed.split(/[:：]/);
+      if (parts.length > 1) sceneElements = parts.slice(1).join(":").trim();
+    } else if (lower.includes("text_treatment") || trimmed.includes("文字处理")) {
+      const parts = trimmed.split(/[:：]/);
+      if (parts.length > 1) textTreatment = parts.slice(1).join(":").trim();
+    } else if (lower.includes("mood") || trimmed.includes("情绪氛围")) {
+      const parts = trimmed.split(/[:：]/);
+      if (parts.length > 1) mood = parts.slice(1).join(":").trim();
+    } else if (lower.includes("color_palette") || trimmed.includes("色彩调色板") || trimmed.includes("调色板")) {
+      const parts = trimmed.split(/[:：]/);
+      if (parts.length > 1) colorPalette = parts.slice(1).join(":").trim();
+    } else if (lower.includes("aspect_ratio") || trimmed.includes("画面比例")) {
+      const parts = trimmed.split(/[:：]/);
+      if (parts.length > 1) aspectRatio = parts.slice(1).join(":").trim();
     }
   }
 
-  // Clean values from markdown formatting
-  const cleanMarkdown = (val: string) => {
-    return val.replace(/[\*\#\>\`]/g, "").trim();
-  };
+  const cleanMarkdown = (val: string) => val.replace(/[\*\#\>\`]/g, "").trim();
 
   coreSubject = cleanMarkdown(coreSubject);
   clothing = cleanMarkdown(clothing);
@@ -156,66 +193,60 @@ function parseDescriptionToJSON(text: string): string {
   background = cleanMarkdown(background);
   lighting = cleanMarkdown(lighting);
   style = cleanMarkdown(style);
+  layout = cleanMarkdown(layout);
+  sceneElements = cleanMarkdown(sceneElements);
+  textTreatment = cleanMarkdown(textTreatment);
+  mood = cleanMarkdown(mood);
+  colorPalette = cleanMarkdown(colorPalette);
+  aspectRatio = cleanMarkdown(aspectRatio);
 
-  // Parse prompt text from final prompt section
   let finalPromptText = finalPromptLines.join("\n").trim();
-  
-  // Clean instructions if the model repeated them
-  const instructionRegexes = [
-    /请根据上述分析，直接组合出可直接复制的流利中文\s*Prompt。/ig,
-    /请使用纯英文自然语言或短语（用逗号隔开），以便我直接复制粘贴：/ig,
-    /请使用纯英文自然语言或短语\s*\(用逗号隔开\)\s*，以便我直接复制粘贴：/ig,
-    /请使用纯英文自然语言或短语\s*（用逗号隔开）\s*，以便我直接复制粘贴：/ig,
-    /请根据上述分析，直接组合出可直接复制的流利中文\s*Prompt/ig,
-    /请使用纯英文自然语言或短语/ig,
-    /以便我直接复制粘贴/ig,
-  ];
 
+  const instructionRegexes = [
+    /请根据上述分析.*?Prompt[。：]*/ig,
+    /请使用纯英文自然语言或短语.*?复制粘贴[：:]*/ig,
+    /要求：[\s\S]*?(?=\n\n|\n[A-Z]|$)/g,
+    /请直接给出 Prompt[：:]*/ig,
+  ];
   for (const regex of instructionRegexes) {
     finalPromptText = finalPromptText.replace(regex, "");
   }
-  // Trim any leading/trailing colons or extra characters left over
   finalPromptText = finalPromptText.replace(/^[:：\s]+/, "").trim();
   finalPromptText = cleanMarkdown(finalPromptText);
 
-  // Fallback to heuristic regexes if some fields are missing
   if (!coreSubject || !style) {
     const cleanText = text.replace(/[\*\#\>\-\`]/g, " ").replace(/\s+/g, " ").trim();
-
     if (!coreSubject) {
-      const subjectMatch = cleanText.match(/(?:主角是|主体是|画面中是|一个|一位|一幅|主角为|主体为|核心焦点为|核心为)([^，。；]+)/i);
-      coreSubject = subjectMatch ? subjectMatch[1].trim() : "";
+      const m = cleanText.match(/(?:主角是|主体是|画面中是|一个|一位|一幅|主角为|主体为|核心焦点为|核心为)([^，。；]+)/i);
+      coreSubject = m ? m[1].trim() : "";
     }
-
     if (!clothing) {
-      const clothingMatch = cleanText.match(/(?:身穿|身着|穿着|身披|着装为|服装为|衣服为|衣服是|身穿一袭)([^，。；]+)/i);
-      clothing = clothingMatch ? clothingMatch[1].trim() : "";
+      const m = cleanText.match(/(?:身穿|身着|穿着|身披|着装为|服装为|衣服为|衣服是)([^，。；]+)/i);
+      clothing = m ? m[1].trim() : "";
     }
-
     if (!location) {
-      const locationMatch = cleanText.match(/(?:在|位于|置身于|场景是|地点是|背景是|场景为|位置为|居中放置)([^，。；]{2,20})(?:中|里|上|下|旁|前|后|，|。|；)/i);
-      location = locationMatch ? locationMatch[1].trim() : "";
+      const m = cleanText.match(/(?:在|位于|置身于|场景是|地点是|背景是|场景为|位置为|居中放置)([^，。；]{2,20})(?:中|里|上|下|旁|前|后|，|。|；)/i);
+      location = m ? m[1].trim() : "";
     }
-
     if (!background) {
-      const backgroundMatch = cleanText.match(/(?:背景是|背景为|背景中包含|背景有|配景为|背景采用)([^。；，]+)/i);
-      background = backgroundMatch ? backgroundMatch[1].trim() : "";
+      const m = cleanText.match(/(?:背景是|背景为|背景中包含|背景有|配景为|背景采用)([^。；，]+)/i);
+      background = m ? m[1].trim() : "";
     }
-
     if (!lighting) {
-      const lightingMatch = cleanText.match(/(?:光线|光影|阳光|照射|照明|光效|光环|散发出)([^，。；]+)/i);
-      lighting = lightingMatch ? lightingMatch[1].trim() : "";
+      const m = cleanText.match(/(?:光线|光影|阳光|照射|照明|光效|光环|散发出)([^，。；]+)/i);
+      lighting = m ? m[1].trim() : "";
     }
-
     if (!style) {
-      const styleMatch = cleanText.match(/(?:风格|画风|设计风格|视觉风格|呈现出|表现为|采用)([^，。；]+)/i);
-      style = styleMatch ? styleMatch[1].trim() : "";
+      const m = cleanText.match(/(?:风格|画风|设计风格|视觉风格|呈现出|表现为|采用)([^，。；]+)/i);
+      style = m ? m[1].trim() : "";
     }
-
+    if (!mood) {
+      const m = cleanText.match(/(?:氛围|情绪|感觉|格调|意境)([^，。；]+)/i);
+      mood = m ? m[1].trim() : "";
+    }
     const sentences = cleanText.split(/[，。；]/).map(s => s.trim()).filter(Boolean);
     if (!coreSubject && sentences.length > 0) coreSubject = sentences[0];
     if (!location && sentences.length > 1) location = sentences[1];
-    
     if (!style) {
       if (cleanText.includes("摄影")) style = "写实摄影肖像";
       else if (cleanText.includes("插画")) style = "动漫手绘插画";
@@ -224,36 +255,29 @@ function parseDescriptionToJSON(text: string): string {
     }
   }
 
-  // Synthesize a structured prompt if no explicit prompt section was captured
   if (!finalPromptText) {
-    const promptParts = [
-      style ? style : "",
-      coreSubject ? coreSubject : "",
-      location ? location : "",
-      clothing ? clothing : "",
-      background ? background : "",
-      lighting ? lighting : ""
-    ].filter(Boolean);
-
-    finalPromptText = promptParts.join("，");
-    if (!finalPromptText) {
-      finalPromptText = text.replace(/[\*\#\>\-\`]/g, " ").replace(/\s+/g, " ").trim();
-    }
+    const promptParts = [style, coreSubject, location, clothing, background, lighting, mood, sceneElements].filter(Boolean);
+    finalPromptText = promptParts.join(", ");
+    if (!finalPromptText) finalPromptText = text.replace(/[\*\#\>\-\`]/g, " ").replace(/\s+/g, " ").trim();
   }
 
-  const jsonObj = {
-    image_prompt: {
-      core_subject: coreSubject,
-      clothing: clothing,
-      location: location,
-      background: background,
-      lighting: lighting,
-      style: style,
-      prompt: finalPromptText
-    }
+  const imagePrompt: Record<string, string> = {
+    core_subject: coreSubject,
+    style: style,
   };
+  if (clothing) imagePrompt.clothing = clothing;
+  if (location) imagePrompt.location = location;
+  if (background) imagePrompt.background = background;
+  if (lighting) imagePrompt.lighting = lighting;
+  if (layout) imagePrompt.layout = layout;
+  if (sceneElements) imagePrompt.scene_elements = sceneElements;
+  if (textTreatment) imagePrompt.text_treatment = textTreatment;
+  if (mood) imagePrompt.mood = mood;
+  if (colorPalette) imagePrompt.color_palette = colorPalette;
+  if (aspectRatio) imagePrompt.aspect_ratio = aspectRatio;
+  imagePrompt.prompt = finalPromptText;
 
-  return JSON.stringify(jsonObj, null, 2);
+  return JSON.stringify({ image_prompt: imagePrompt }, null, 2);
 }
 
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
@@ -264,15 +288,63 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   soundEnabled, onSoundToggle,
   cwd,
   onOpenCookieConfig,
+  designSystem,
+  onDesignSystemChange,
+  designSystemList,
+  onOpenDeepResearch,
+  isNew,
+  sessionId,
 }: Props, ref) {
   const [value, setValue] = useState("");
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [toolDropdownOpen, setToolDropdownOpen] = useState(false);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
+  const [designDropdownOpen, setDesignDropdownOpen] = useState(false);
+  const [designDropdownRect, setDesignDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [previewDsId, setPreviewDsId] = useState<string | null>(null);
   const [videoUploadDropdownOpen, setVideoUploadDropdownOpen] = useState(false);
   const [videoLinkUrl, setVideoLinkUrl] = useState("");
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
+  const [geminiMenuOpen, setGeminiMenuOpen] = useState(false);
+  const [geminiSubMenu, setGeminiSubMenu] = useState<'none' | 'upload_options' | 'tools' | 'workspace_files' | 'dev_modes'>('none');
+  const [devMode, setDevMode] = useState<"direct" | "guarded" | "rigorous">("guarded");
+  const lastIsNewRef = useRef(isNew);
+  useEffect(() => {
+    if (isNew && !lastIsNewRef.current) {
+      localStorage.setItem("mimo_dev_mode_temp", "guarded");
+      setDevMode("guarded");
+    }
+    lastIsNewRef.current = isNew;
+
+    if (isNew || !sessionId) {
+      const tempStored = localStorage.getItem("mimo_dev_mode_temp");
+      if (tempStored === "direct" || tempStored === "guarded" || tempStored === "rigorous") {
+        setDevMode(tempStored);
+      } else {
+        setDevMode("guarded");
+      }
+    } else {
+      let stored = localStorage.getItem(`mimo_dev_mode_${sessionId}`);
+      if (!stored) {
+        const tempStored = localStorage.getItem("mimo_dev_mode_temp");
+        if (tempStored === "direct" || tempStored === "guarded" || tempStored === "rigorous") {
+          stored = tempStored;
+          localStorage.setItem(`mimo_dev_mode_${sessionId}`, tempStored);
+          localStorage.removeItem("mimo_dev_mode_temp");
+        }
+      }
+      if (stored === "direct" || stored === "guarded" || stored === "rigorous") {
+        setDevMode(stored);
+      } else {
+        setDevMode("guarded");
+      }
+    }
+  }, [sessionId, isNew]);
+  const [workspacePath, setWorkspacePath] = useState<string>("");
+  const [workspaceFiles, setWorkspaceFiles] = useState<{ name: string; fullPath: string; isDir: boolean; size: number }[]>([]);
+  const [workspaceSearchQuery, setWorkspaceSearchQuery] = useState("");
+  const [loadingWorkspaceFiles, setLoadingWorkspaceFiles] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<{ file: File; name: string; size: number }[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [describingIndices, setDescribingIndices] = useState<Record<number, boolean>>({});
@@ -281,6 +353,129 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [promptModalText, setPromptModalText] = useState("");
   const [copySuccess, setCopySuccess] = useState(false);
   const [promptTab, setPromptTab] = useState<"text" | "json">("text");
+  const [placeholderValues, setPlaceholderValues] = useState<Record<string, string>>({});
+  const [presetDropdownOpen, setPresetDropdownOpen] = useState(false);
+  const presetDropdownRef = useRef<HTMLDivElement>(null);
+  const [activePreset, setActivePreset] = useState<PromptPreset | null>(null);
+  const [dynamicPresets, setDynamicPresets] = useState<PromptPreset[] | null>(null);
+  const [presetsAvailable, setPresetsAvailable] = useState(false);
+
+  const [downloadModalOpen, setDownloadModalOpen] = useState(false);
+  const [downloadStage, setDownloadStage] = useState<"idle" | "downloading" | "extracting" | "done" | "error">("idle");
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [downloadMessage, setDownloadMessage] = useState("");
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  const startPresetsDownload = async () => {
+    setDownloadStage("downloading");
+    setDownloadProgress(0);
+    setDownloadMessage("正在初始化连接...");
+    setDownloadError(null);
+
+    try {
+      const response = await fetch("/api/agent/prompt-presets/download", {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error(`连接下载服务失败 (HTTP ${response.status})`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("无法读取服务器响应流");
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(trimmed.slice(6));
+              if (data.stage) {
+                setDownloadStage(data.stage);
+              }
+              if (data.progress !== undefined) {
+                setDownloadProgress(data.progress);
+              }
+              if (data.message) {
+                setDownloadMessage(data.message);
+              }
+              if (data.stage === "done") {
+                const res = await fetch("/api/agent/prompt-presets");
+                if (res.ok) {
+                  const presetData = await res.json();
+                  if (presetData.exists && presetData.presets && presetData.presets.length > 0) {
+                    setDynamicPresets(presetData.presets);
+                    setPresetsAvailable(true);
+                  }
+                }
+                
+                setTimeout(() => {
+                  setDownloadModalOpen(false);
+                  setDownloadStage("idle");
+                }, 1500);
+              }
+              if (data.stage === "error") {
+                setDownloadError(data.message || "下载过程中出错");
+                setDownloadStage("error");
+              }
+            } catch (e) {
+              console.error("Failed to parse event data:", e);
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error("Download failed:", err);
+      setDownloadError(err.message || "请求失败");
+      setDownloadStage("error");
+    }
+  };
+
+  const allPresets: PromptPreset[] = dynamicPresets && dynamicPresets.length > 0 ? dynamicPresets : PROMPT_PRESETS;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const url = `/api/agent/prompt-presets`;
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok) {
+          setPresetsAvailable(false);
+          return;
+        }
+        const data = await res.json() as { exists?: boolean; presets?: PromptPreset[] };
+        if (data.exists && data.presets && data.presets.length > 0) {
+          setDynamicPresets(data.presets);
+          setPresetsAvailable(true);
+        } else {
+          setPresetsAvailable(false);
+        }
+      } catch {
+        setPresetsAvailable(false);
+      }
+    })();
+    return () => controller.abort();
+  }, []);
+
+  const [pptPanelOpen, setPptPanelOpen] = useState(false);
+  const [pptTheme, setPptTheme] = useState('tokyo-night');
+  const [pptTemplate, setPptTemplate] = useState('tech-sharing');
+  const [pptSlides, setPptSlides] = useState(10);
+  const [pptAudience, setPptAudience] = useState('');
+  const [pptTopic, setPptTopic] = useState('');
+  const pptPanelRef = useRef<HTMLDivElement>(null);
 
   const isTts = model ? isTtsModel(model.provider, model.modelId) : false;
 
@@ -421,7 +616,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const modelDropdownPanelRef = useRef<HTMLDivElement>(null);
   const toolDropdownRef = useRef<HTMLDivElement>(null);
   const thinkingDropdownRef = useRef<HTMLDivElement>(null);
+  const designDropdownRef = useRef<HTMLDivElement>(null);
   const videoUploadDropdownRef = useRef<HTMLDivElement>(null);
+  const geminiMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fileUploadInputRef = useRef<HTMLInputElement>(null);
   const videoFileInputRef = useRef<HTMLInputElement>(null);
@@ -622,6 +819,8 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
       setPromptModalOpen(true);
       setCopySuccess(false);
       setPromptTab("text");
+      setPlaceholderValues({});
+      setActivePreset(null);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
@@ -692,13 +891,23 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
       setIsUploading(false);
     }
 
+    const devModeDirectives: Record<string, string> = {
+      direct: "[Directive] You are currently in DIRECT mode. Please answer queries and modify code directly. Avoid generating specs, creating task checklists (task.md), or enforcing strict workflow gates unless explicitly asked. Respond as quickly and concisely as possible. Do NOT output XML tags like '<tool_call>' or '<function>' to call tools; use your native function calling API.",
+      guarded: "[Directive] You are currently in GUARDED mode. You should only use/invoke engineering skills (such as frontend-ui-engineering, doubt-driven-development, or planning) if the task is complex, non-trivial, or touches multiple core files. For simple edits or explanations, respond directly and briefly without planning overhead. Do NOT output XML tags like '<tool_call>' or '<function>' to call tools; use your native function calling API.",
+      rigorous: "[Directive] You are currently in RIGOROUS mode. You MUST strictly follow the SWE workflow: write specification first (spec-driven-development), break down tasks into task.md (planning-and-task-breakdown), implement incrementally, and write automated tests (test-driven-development). Do not skip these quality gates. IMPORTANT: Do NOT output XML tags like '<tool_call>' or '<function>' to call tools; use your native function calling API.",
+    };
+    const directive = devModeDirectives[devMode];
+    if (directive) {
+      finalMsg = `${finalMsg}\n<!-- PI_HIDDEN_START -->\n${directive}\n<!-- PI_HIDDEN_END -->`;
+    }
+
     onSend(finalMsg, attachedImages.length ? attachedImages : undefined);
     setValue("");
     clearImages();
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [value, attachedImages, attachedFiles, isStreaming, isUploading, onSend, clearImages, model, modelList, cwd, formatBytes]);
+  }, [value, attachedImages, attachedFiles, isStreaming, isUploading, onSend, clearImages, model, modelList, cwd, formatBytes, devMode]);
 
   const sendQueued = useCallback(async (mode: "steer" | "followup") => {
     const msg = value.trim();
@@ -751,6 +960,16 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
       setIsUploading(false);
     }
 
+    const devModeDirectives: Record<string, string> = {
+      direct: "[Directive] You are currently in DIRECT mode. Please answer queries and modify code directly. Avoid generating specs, creating task checklists (task.md), or enforcing strict workflow gates unless explicitly asked. Respond as quickly and concisely as possible. Do NOT output XML tags like '<tool_call>' or '<function>' to call tools; use your native function calling API.",
+      guarded: "[Directive] You are currently in GUARDED mode. You should only use/invoke engineering skills (such as frontend-ui-engineering, doubt-driven-development, or planning) if the task is complex, non-trivial, or touches multiple core files. For simple edits or explanations, respond directly and briefly without planning overhead. Do NOT output XML tags like '<tool_call>' or '<function>' to call tools; use your native function calling API.",
+      rigorous: "[Directive] You are currently in RIGOROUS mode. You MUST strictly follow the SWE workflow: write specification first (spec-driven-development), break down tasks into task.md (planning-and-task-breakdown), implement incrementally, and write automated tests (test-driven-development). Do not skip these quality gates. IMPORTANT: Do NOT output XML tags like '<tool_call>' or '<function>' to call tools; use your native function calling API.",
+    };
+    const directive = devModeDirectives[devMode];
+    if (directive) {
+      finalMsg = `${finalMsg}\n<!-- PI_HIDDEN_START -->\n${directive}\n<!-- PI_HIDDEN_END -->`;
+    }
+
     if (mode === "steer" && onSteer) {
       onSteer(finalMsg, attachedImages.length ? attachedImages : undefined);
     } else if (mode === "followup" && onFollowUp) {
@@ -759,7 +978,7 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
     setValue("");
     clearImages();
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [value, attachedImages, attachedFiles, onSteer, onFollowUp, clearImages, model, modelList, cwd, isUploading, formatBytes]);
+  }, [value, attachedImages, attachedFiles, onSteer, onFollowUp, clearImages, model, modelList, cwd, isUploading, formatBytes, devMode]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -833,13 +1052,76 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
       if (thinkingDropdownRef.current && !thinkingDropdownRef.current.contains(e.target as Node)) {
         setThinkingDropdownOpen(false);
       }
+      if (designDropdownRef.current && !designDropdownRef.current.contains(e.target as Node)) {
+        setDesignDropdownOpen(false);
+      }
       if (videoUploadDropdownRef.current && !videoUploadDropdownRef.current.contains(e.target as Node)) {
         setVideoUploadDropdownOpen(false);
+      }
+      if (geminiMenuRef.current && !geminiMenuRef.current.contains(e.target as Node)) {
+        setGeminiMenuOpen(false);
+        setGeminiSubMenu('none');
+      }
+      if (pptPanelRef.current && !pptPanelRef.current.contains(e.target as Node)) {
+        setPptPanelOpen(false);
+      }
+      if (presetDropdownRef.current && !presetDropdownRef.current.contains(e.target as Node)) {
+        setPresetDropdownOpen(false);
       }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  const loadWorkspaceFiles = useCallback(async (dirPath: string) => {
+    if (!dirPath) return;
+    setLoadingWorkspaceFiles(true);
+    try {
+      const encoded = encodeFilePathForApi(dirPath);
+      const res = await fetch(`/api/files/${encoded}?type=list`);
+      if (res.ok) {
+        const data = await res.json() as { entries?: { name: string; isDir: boolean; size: number }[] };
+        const list = (data.entries ?? []).map(e => ({
+          name: e.name,
+          fullPath: joinFilePath(dirPath, e.name),
+          isDir: e.isDir,
+          size: e.size
+        }));
+        list.sort((a, b) => {
+          if (a.isDir && !b.isDir) return -1;
+          if (!a.isDir && b.isDir) return 1;
+          return a.name.localeCompare(b.name);
+        });
+        setWorkspaceFiles(list);
+      }
+    } catch (err) {
+      console.error("Error loading workspace files:", err);
+    } finally {
+      setLoadingWorkspaceFiles(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (geminiSubMenu === 'workspace_files' && workspacePath) {
+      loadWorkspaceFiles(workspacePath);
+    }
+  }, [geminiSubMenu, workspacePath, loadWorkspaceFiles]);
+
+  const handleAttachWorkspaceFile = async (name: string, fullPath: string, size: number) => {
+    try {
+      const encoded = encodeFilePathForApi(fullPath);
+      const res = await fetch(`/api/files/${encoded}?type=read`);
+      if (!res.ok) throw new Error("Failed to read file from workspace");
+      const blob = await res.blob();
+      const file = new File([blob], name);
+      setAttachedFiles(prev => [...prev, { file, name, size }]);
+      setGeminiMenuOpen(false);
+      setGeminiSubMenu('none');
+    } catch (err) {
+      console.error("Error attaching workspace file:", err);
+      setDescribeError("附加工作区文件失败");
+    }
+  };
 
 
 
@@ -1320,52 +1602,26 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
 
           {/* LEFT: attach + model selector (idle) or steer/followup toggle (streaming) */}
           <div style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 2 }}>
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isStreaming}
-              title="Attach image"
-              style={{
-                flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                width: 32, height: 32, padding: 0,
-                background: "none", border: "none",
-                borderRadius: 9,
-                color: attachedImages.length ? "var(--accent)" : "var(--text-muted)",
-                cursor: isStreaming ? "not-allowed" : "pointer",
-                opacity: isStreaming ? 0.5 : 1,
-                transition: "background 0.12s, color 0.12s",
-              }}
-              onMouseEnter={(e) => {
-                if (isStreaming) return;
-                e.currentTarget.style.background = "var(--bg-hover)";
-                e.currentTarget.style.color = attachedImages.length ? "var(--accent)" : "var(--text)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "none";
-                e.currentTarget.style.color = attachedImages.length ? "var(--accent)" : "var(--text-muted)";
-              }}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                <circle cx="8.5" cy="8.5" r="1.5" />
-                <polyline points="21 15 16 10 5 21" />
-              </svg>
-            </button>
-
-            {/* Video or Link Extract Button & Dropdown */}
-            <div ref={videoUploadDropdownRef} style={{ position: "relative" }}>
+            {/* Gemini-Style Unified menu trigger button */}
+            <div ref={geminiMenuRef} style={{ position: "relative" }}>
               <button
-                onClick={() => !isStreaming && setVideoUploadDropdownOpen((v) => !v)}
+                onClick={() => {
+                  if (isStreaming) return;
+                  setGeminiMenuOpen(open => !open);
+                  setGeminiSubMenu('none');
+                }}
                 disabled={isStreaming}
-                title="上传视频或提取视频链接文案"
+                title="添加附件或使用工具"
                 style={{
                   flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
                   width: 32, height: 32, padding: 0,
-                  background: videoUploadDropdownOpen ? "var(--bg-hover)" : "none", border: "none",
-                  borderRadius: 9,
-                  color: "var(--text-muted)",
+                  background: geminiMenuOpen ? "var(--bg-hover)" : "none", border: "none",
+                  borderRadius: "50%",
+                  color: (attachedImages.length || attachedFiles.length) ? "var(--accent)" : "var(--text-muted)",
                   cursor: isStreaming ? "not-allowed" : "pointer",
                   opacity: isStreaming ? 0.5 : 1,
-                  transition: "background 0.12s, color 0.12s",
+                  transition: "background 0.2s, transform 0.2s, color 0.2s",
+                  transform: geminiMenuOpen ? "rotate(45deg)" : "none",
                 }}
                 onMouseEnter={(e) => {
                   if (isStreaming) return;
@@ -1373,114 +1629,500 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
                   e.currentTarget.style.color = "var(--text)";
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = videoUploadDropdownOpen ? "var(--bg-hover)" : "none";
-                  e.currentTarget.style.color = "var(--text-muted)";
+                  e.currentTarget.style.background = geminiMenuOpen ? "var(--bg-hover)" : "none";
+                  e.currentTarget.style.color = (attachedImages.length || attachedFiles.length) ? "var(--accent)" : "var(--text-muted)";
                 }}
               >
-                {/* Combined video/link style icon: a video camera */}
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M23 7l-7 5 7 5V7z" />
-                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
                 </svg>
               </button>
-              {videoUploadDropdownOpen && (
-                <div style={{
-                  position: "absolute", bottom: "calc(100% + 6px)", left: 0,
-                  zIndex: 100, background: "var(--bg-panel)", border: "1px solid var(--border)",
-                  borderRadius: 10, boxShadow: "0 -4px 20px rgba(0,0,0,0.15)",
-                  padding: 12, width: 390, display: "flex", flexDirection: "column", gap: 10
-                }}>
-                  {/* Local Video Upload Option */}
-                  <button
-                    onClick={() => {
-                      setVideoUploadDropdownOpen(false);
-                      videoFileInputRef.current?.click();
-                    }}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 8,
-                      width: "100%", padding: "8px 10px",
-                      background: "none", border: "1px solid var(--border)", borderRadius: 6,
-                      color: "var(--text)", cursor: "pointer", fontSize: 12, textAlign: "left",
-                      transition: "background 0.12s"
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = "var(--bg-hover)"}
-                    onMouseLeave={(e) => e.currentTarget.style.background = "none"}
-                  >
-                    <span style={{ fontSize: 14 }}>💻</span>
-                    <span style={{ fontSize: 12, fontWeight: 500 }}>上传本地视频文件</span>
-                  </button>
 
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-                    <span style={{ fontSize: 10, color: "var(--text-dim)" }}>或</span>
-                    <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-                  </div>
+              {geminiMenuOpen && (() => {
+                const menuItemStyle: React.CSSProperties = {
+                  display: "flex",
+                  alignItems: "center",
+                  width: "100%",
+                  padding: "8px 10px",
+                  background: "none",
+                  border: "none",
+                  borderRadius: 12,
+                  color: "var(--text)",
+                  cursor: "pointer",
+                  fontSize: 12.5,
+                  textAlign: "left",
+                  transition: "background 0.12s, transform 0.08s",
+                  gap: 10
+                };
 
-                  {/* Video Link Input Option */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>
-                      粘贴视频链接 (B站/抖音/小红书/YouTube):
-                    </div>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <input
-                        type="text"
-                        value={videoLinkUrl}
-                        onChange={(e) => setVideoLinkUrl(e.target.value)}
-                        placeholder="粘贴链接并回车..."
-                        style={{
-                          flex: 1, padding: "5px 8px", borderRadius: 6, fontSize: 12,
-                          border: "1px solid var(--border)", background: "var(--bg)",
-                          color: "var(--text)", outline: "none",
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && videoLinkUrl.trim()) {
-                            extractionSourceRef.current = { type: 'link', value: videoLinkUrl.trim() };
-                            videoScript.processLink(videoLinkUrl.trim(), getPolishModel());
-                            setVideoLinkUrl("");
-                            setVideoUploadDropdownOpen(false);
-                          }
-                        }}
-                      />
-                      <button
-                        onClick={() => {
-                          if (videoLinkUrl.trim()) {
-                            extractionSourceRef.current = { type: 'link', value: videoLinkUrl.trim() };
-                            videoScript.processLink(videoLinkUrl.trim(), getPolishModel());
-                            setVideoLinkUrl("");
-                            setVideoUploadDropdownOpen(false);
-                          }
-                        }}
-                        disabled={!videoLinkUrl.trim() || videoScript.state === 'extracting' || videoScript.state === 'transcribing' || videoScript.state === 'polishing'}
-                        style={{
-                          padding: "5px 10px", borderRadius: 6, fontSize: 12, fontWeight: 600,
-                          border: "none", background: videoLinkUrl.trim() ? "var(--accent)" : "var(--border)",
-                          color: videoLinkUrl.trim() ? "#fff" : "var(--text-dim)",
-                          cursor: videoLinkUrl.trim() ? "pointer" : "not-allowed",
-                        }}
-                      >
-                        提取
-                      </button>
-                    </div>
-                    <div style={{ marginTop: 4, display: "flex", justifyContent: "flex-end" }}>
-                      <button
-                        onClick={() => {
-                          setVideoUploadDropdownOpen(false);
-                          onOpenCookieConfig?.();
-                        }}
-                        style={{
-                          background: "none", border: "none", color: "var(--accent)",
-                          fontSize: 10, cursor: "pointer", display: "flex", alignItems: "center",
-                          gap: 3, padding: "2px 4px", borderRadius: 4, transition: "background 0.15s"
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = "var(--bg-hover)"}
-                        onMouseLeave={(e) => e.currentTarget.style.background = "none"}
-                      >
-                        ⚙️ B站 Cookie 配置
-                      </button>
-                    </div>
+                const menuItemIconStyle: React.CSSProperties = {
+                  display: "flex",
+                  alignItems: "center",
+                  color: "var(--text-muted)",
+                  fontSize: 14,
+                  width: 16,
+                  justifyContent: "center"
+                };
+
+                const menuItemArrowStyle: React.CSSProperties = {
+                  fontSize: 14,
+                  color: "var(--text-dim)",
+                  fontWeight: 600
+                };
+
+                const workspaceItemStyle: React.CSSProperties = {
+                  display: "flex",
+                  alignItems: "center",
+                  width: "100%",
+                  padding: "6px 8px",
+                  background: "none",
+                  border: "none",
+                  borderRadius: 8,
+                  color: "var(--text)",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  gap: 8,
+                  transition: "background 0.12s"
+                };
+
+                const menuItemHover = (e: React.MouseEvent<HTMLButtonElement>) => {
+                  e.currentTarget.style.background = "var(--bg-hover)";
+                };
+
+                const menuItemLeave = (e: React.MouseEvent<HTMLButtonElement>) => {
+                  e.currentTarget.style.background = "none";
+                };
+
+                return (
+                  <div style={{
+                    position: "absolute", bottom: "calc(100% + 8px)", left: 0,
+                    zIndex: 400,
+                    background: "color-mix(in srgb, var(--bg-panel) 92%, transparent)",
+                    backdropFilter: "blur(16px)",
+                    WebkitBackdropFilter: "blur(16px)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 20,
+                    boxShadow: "0 12px 32px rgba(0, 0, 0, 0.25)",
+                    padding: 8,
+                    width: 260,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 2,
+                    animation: "drop-zone-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards",
+                  }}>
+                    {geminiSubMenu === 'none' && (
+                      <>
+
+                        {/* Items */}
+                        <button
+                          onClick={() => { setGeminiMenuOpen(false); fileUploadInputRef.current?.click(); }}
+                          style={menuItemStyle}
+                          onMouseEnter={menuItemHover}
+                          onMouseLeave={menuItemLeave}
+                        >
+                          <span style={menuItemIconStyle}>
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                            </svg>
+                          </span>
+                          <span style={{ flex: 1 }}>上传文件</span>
+                        </button>
+
+                        <button
+                          onClick={() => { setGeminiMenuOpen(false); fileInputRef.current?.click(); }}
+                          style={menuItemStyle}
+                          onMouseEnter={menuItemHover}
+                          onMouseLeave={menuItemLeave}
+                        >
+                          <span style={menuItemIconStyle}>
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                              <circle cx="8.5" cy="8.5" r="1.5" />
+                              <polyline points="21 15 16 10 5 21" />
+                            </svg>
+                          </span>
+                          <span style={{ flex: 1 }}>上传图片</span>
+                        </button>
+
+                        <button
+                          onClick={() => { setGeminiSubMenu('workspace_files'); setWorkspacePath(cwd || ''); }}
+                          style={menuItemStyle}
+                          onMouseEnter={menuItemHover}
+                          onMouseLeave={menuItemLeave}
+                        >
+                          <span style={menuItemIconStyle}>
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                            </svg>
+                          </span>
+                          <span style={{ flex: 1 }}>从当前工作区添加</span>
+                        </button>
+
+                        <button
+                          onClick={() => setGeminiSubMenu('upload_options')}
+                          style={menuItemStyle}
+                          onMouseEnter={menuItemHover}
+                          onMouseLeave={menuItemLeave}
+                        >
+                          <span style={menuItemIconStyle}>
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" />
+                            </svg>
+                          </span>
+                          <span style={{ flex: 1 }}>更多上传选项</span>
+                          <span style={menuItemArrowStyle}>›</span>
+                        </button>
+
+                        <div style={{ height: 1, background: "var(--border)", margin: "4px 8px" }} />
+
+                        <button
+                          onClick={() => {
+                            setGeminiMenuOpen(false);
+                            const prefix = "帮我生成一张图片：";
+                            setValue(prev => prev.startsWith(prefix) ? prev : `${prefix}${prev}`);
+                            setTimeout(() => textareaRef.current?.focus(), 50);
+                          }}
+                          style={menuItemStyle}
+                          onMouseEnter={menuItemHover}
+                          onMouseLeave={menuItemLeave}
+                        >
+                          <span style={menuItemIconStyle}>
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 14.7255 3.09032 17.1962 4.85857 19" />
+                              <circle cx="7.5" cy="10.5" r="1" fill="currentColor" />
+                              <circle cx="11.5" cy="7.5" r="1" fill="currentColor" />
+                              <circle cx="16.5" cy="9.5" r="1" fill="currentColor" />
+                            </svg>
+                          </span>
+                          <span style={{ flex: 1 }}>制作图片</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setGeminiMenuOpen(false);
+                            onOpenDeepResearch?.();
+                          }}
+                          style={menuItemStyle}
+                          onMouseEnter={menuItemHover}
+                          onMouseLeave={menuItemLeave}
+                        >
+                          <span style={menuItemIconStyle}>
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <circle cx="12" cy="12" r="10" />
+                              <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
+                            </svg>
+                          </span>
+                          <span style={{ flex: 1 }}>Deep Research</span>
+                        </button>
+
+                        <button
+                          onClick={() => setGeminiSubMenu('dev_modes')}
+                          style={menuItemStyle}
+                          onMouseEnter={menuItemHover}
+                          onMouseLeave={menuItemLeave}
+                        >
+                          <span style={menuItemIconStyle}>🛠️</span>
+                          <span style={{ flex: 1 }}>开发模式规范: {{
+                            direct: "⚡ 极速",
+                            guarded: "🛡️ 守护",
+                            rigorous: "🎯 严谨",
+                          }[devMode]}</span>
+                          <span style={menuItemArrowStyle}>›</span>
+                        </button>
+
+                        <button
+                          onClick={() => setGeminiSubMenu('tools')}
+                          style={menuItemStyle}
+                          onMouseEnter={menuItemHover}
+                          onMouseLeave={menuItemLeave}
+                        >
+                          <span style={menuItemIconStyle}>
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <circle cx="12" cy="12" r="3" />
+                              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                            </svg>
+                          </span>
+                          <span style={{ flex: 1 }}>更多工具</span>
+                          <span style={menuItemArrowStyle}>›</span>
+                        </button>
+                      </>
+                    )}
+
+                    {geminiSubMenu === 'upload_options' && (
+                      <>
+                        {/* Header */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px 8px 8px', borderBottom: '1px solid var(--border)', marginBottom: 4 }}>
+                          <button onClick={() => setGeminiSubMenu('none')} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 0 }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" />
+                            </svg>
+                          </button>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>更多上传选项</span>
+                        </div>
+
+                        <button
+                          onClick={() => { setGeminiMenuOpen(false); setGeminiSubMenu('none'); videoFileInputRef.current?.click(); }}
+                          style={menuItemStyle}
+                          onMouseEnter={menuItemHover}
+                          onMouseLeave={menuItemLeave}
+                        >
+                          <span style={menuItemIconStyle}>🎥</span>
+                          <span style={{ flex: 1 }}>上传本地视频文件-提取方案</span>
+                        </button>
+
+                        <div style={{ height: 1, background: "var(--border)", margin: "4px 8px" }} />
+
+                        {/* Video Link Input Option */}
+                        <div style={{ padding: "6px 8px", display: "flex", flexDirection: "column", gap: 6 }}>
+                          <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>
+                            粘贴视频链接 (B站/抖音/小红书/YouTube):
+                          </div>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <input
+                              type="text"
+                              value={videoLinkUrl}
+                              onChange={(e) => setVideoLinkUrl(e.target.value)}
+                              placeholder="粘贴链接并回车..."
+                              style={{
+                                flex: 1, padding: "5px 8px", borderRadius: 8, fontSize: 12,
+                                border: "1px solid var(--border)", background: "var(--bg)",
+                                color: "var(--text)", outline: "none",
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && videoLinkUrl.trim()) {
+                                  extractionSourceRef.current = { type: 'link', value: videoLinkUrl.trim() };
+                                  videoScript.processLink(videoLinkUrl.trim(), getPolishModel());
+                                  setVideoLinkUrl("");
+                                  setGeminiMenuOpen(false);
+                                  setGeminiSubMenu('none');
+                                }
+                              }}
+                            />
+                            <button
+                              onClick={() => {
+                                if (videoLinkUrl.trim()) {
+                                  extractionSourceRef.current = { type: 'link', value: videoLinkUrl.trim() };
+                                  videoScript.processLink(videoLinkUrl.trim(), getPolishModel());
+                                  setVideoLinkUrl("");
+                                  setGeminiMenuOpen(false);
+                                  setGeminiSubMenu('none');
+                                }
+                              }}
+                              disabled={!videoLinkUrl.trim() || videoScript.state === 'extracting' || videoScript.state === 'transcribing' || videoScript.state === 'polishing'}
+                              style={{
+                                padding: "5px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600,
+                                border: "none", background: videoLinkUrl.trim() ? "var(--accent)" : "var(--border)",
+                                color: videoLinkUrl.trim() ? "#fff" : "var(--text-dim)",
+                                cursor: videoLinkUrl.trim() ? "pointer" : "not-allowed",
+                              }}
+                            >
+                              提取
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {geminiSubMenu === 'tools' && (
+                      <>
+                        {/* Header */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px 8px 8px', borderBottom: '1px solid var(--border)', marginBottom: 4 }}>
+                          <button onClick={() => setGeminiSubMenu('none')} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 0 }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" />
+                            </svg>
+                          </button>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>更多工具</span>
+                        </div>
+
+                        {isTts && (
+                          <>
+                            <button
+                              onClick={() => { setGeminiMenuOpen(false); setGeminiSubMenu('none'); setVoiceConsoleOpen(v => !v); }}
+                              style={menuItemStyle}
+                              onMouseEnter={menuItemHover}
+                              onMouseLeave={menuItemLeave}
+                            >
+                              <span style={menuItemIconStyle}>🎙️</span>
+                              <span style={{ flex: 1 }}>语音工坊设定</span>
+                            </button>
+
+                            {(() => {
+                              const modelIdStr = model?.modelId || "";
+                              const isVoiceClone = isVoiceCloneModel(model?.provider, modelIdStr);
+                              if (!isVoiceClone) return null;
+                              return (
+                                <button
+                                  onClick={() => { setGeminiMenuOpen(false); setGeminiSubMenu('none'); if (isRecording) stopRecording(); else startRecording(); }}
+                                  style={menuItemStyle}
+                                  onMouseEnter={menuItemHover}
+                                  onMouseLeave={menuItemLeave}
+                                >
+                                  <span style={menuItemIconStyle}>🎤</span>
+                                  <span style={{ flex: 1 }}>{isRecording ? "停止录音" : "麦克风录音 (声音克隆)"}</span>
+                                </button>
+                              );
+                            })()}
+                          </>
+                        )}
+
+                        <button
+                          onClick={() => { setGeminiMenuOpen(false); setGeminiSubMenu('none'); onOpenCookieConfig?.(); }}
+                          style={menuItemStyle}
+                          onMouseEnter={menuItemHover}
+                          onMouseLeave={menuItemLeave}
+                        >
+                          <span style={menuItemIconStyle}>⚙️</span>
+                          <span style={{ flex: 1 }}>B站 Cookie 配置</span>
+                        </button>
+                      </>
+                    )}
+
+                    {geminiSubMenu === 'dev_modes' && (
+                      <>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px 8px 8px', borderBottom: '1px solid var(--border)', marginBottom: 4 }}>
+                          <button
+                            onClick={() => setGeminiSubMenu('none')}
+                            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 0 }}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" />
+                            </svg>
+                          </button>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>切换开发规范模式</span>
+                        </div>
+                        {([
+                          { id: 'direct', label: '⚡ 极速模式 (Direct)', desc: '不启用工程规范，快速问答和单点修改。' },
+                          { id: 'guarded', label: '🛡️ 守护模式 (Guarded)', desc: '日常推荐。仅在复杂/多文件修改时激活规范。' },
+                          { id: 'rigorous', label: '🎯 严谨模式 (Rigorous)', desc: '强制执行 TDD 流程与任务分解，严防疏漏。' },
+                        ] as const).map((m) => (
+                          <button
+                            key={m.id}
+                            onClick={() => {
+                              setDevMode(m.id);
+                              if (sessionId) {
+                                localStorage.setItem(`mimo_dev_mode_${sessionId}`, m.id);
+                              } else {
+                                localStorage.setItem("mimo_dev_mode_temp", m.id);
+                              }
+                              setGeminiMenuOpen(false);
+                              setGeminiSubMenu('none');
+                            }}
+                            style={{
+                              ...menuItemStyle,
+                              background: devMode === m.id ? "var(--bg-selected)" : "none",
+                              flexDirection: "column",
+                              alignItems: "flex-start",
+                              gap: 2,
+                              padding: "8px 12px",
+                            }}
+                            onMouseEnter={menuItemHover}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = devMode === m.id ? "var(--bg-selected)" : "none";
+                            }}
+                          >
+                            <span style={{ fontSize: 12.5, fontWeight: devMode === m.id ? 600 : 500, color: devMode === m.id ? "var(--accent)" : "var(--text)" }}>
+                              {m.label}
+                            </span>
+                            <span style={{ fontSize: 10.5, color: "var(--text-muted)", lineHeight: 1.3 }}>
+                              {m.desc}
+                            </span>
+                          </button>
+                        ))}
+                      </>
+                    )}
+
+                    {geminiSubMenu === 'workspace_files' && (
+                      <>
+                        {/* Header */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px 8px 8px', borderBottom: '1px solid var(--border)', marginBottom: 4 }}>
+                          <button onClick={() => { setGeminiSubMenu('none'); setWorkspaceSearchQuery(''); }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 0 }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" />
+                            </svg>
+                          </button>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                            工作区: {workspacePath.replace(cwd || '', '') || '/'}
+                          </span>
+                        </div>
+
+                        {/* Search box */}
+                        <div style={{ padding: "0 4px 6px 4px" }}>
+                          <input
+                            type="text"
+                            value={workspaceSearchQuery}
+                            onChange={(e) => setWorkspaceSearchQuery(e.target.value)}
+                            placeholder="搜索项目文件..."
+                            style={{
+                              width: "100%", padding: "5px 8px", borderRadius: 8, fontSize: 12,
+                              border: "1px solid var(--border)", background: "var(--bg)",
+                              color: "var(--text)", outline: "none"
+                            }}
+                          />
+                        </div>
+
+                        {/* Files list */}
+                        <div style={{ maxHeight: 180, overflowY: "auto", display: "flex", flexDirection: "column", gap: 1, padding: "0 2px" }}>
+                          {loadingWorkspaceFiles ? (
+                            <div style={{ fontSize: 11, color: "var(--text-dim)", padding: "12px", textAlign: "center" }}>
+                              加载中...
+                            </div>
+                          ) : (
+                            <>
+                              {workspacePath !== cwd && (
+                                <button
+                                  onClick={() => {
+                                    const parts = workspacePath.split(/[/\\]/);
+                                    parts.pop();
+                                    const parent = parts.join('/');
+                                    if (parent.startsWith(cwd || '')) {
+                                      setWorkspacePath(parent);
+                                    }
+                                  }}
+                                  style={workspaceItemStyle}
+                                  onMouseEnter={menuItemHover}
+                                  onMouseLeave={menuItemLeave}
+                                >
+                                  <span>📁</span>
+                                  <span style={{ fontWeight: 600 }}>.. (上一级)</span>
+                                </button>
+                              )}
+
+                              {workspaceFiles.filter(f => f.name.toLowerCase().includes(workspaceSearchQuery.toLowerCase())).map((f) => (
+                                <button
+                                  key={f.fullPath}
+                                  onClick={() => {
+                                    if (f.isDir) {
+                                      setWorkspacePath(f.fullPath);
+                                      setWorkspaceSearchQuery('');
+                                    } else {
+                                      handleAttachWorkspaceFile(f.name, f.fullPath, f.size);
+                                    }
+                                  }}
+                                  style={workspaceItemStyle}
+                                  onMouseEnter={menuItemHover}
+                                  onMouseLeave={menuItemLeave}
+                                >
+                                  <span>{f.isDir ? '📁' : '📄'}</span>
+                                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' }}>
+                                    {f.name}
+                                  </span>
+                                  {!f.isDir && (
+                                    <span style={{ fontSize: 9, color: "var(--text-dim)", flexShrink: 0 }}>
+                                      {formatBytes(f.size)}
+                                    </span>
+                                  )}
+                                </button>
+                              ))}
+                            </>
+                          )}
+                        </div>
+                      </>
+                    )}
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
 
             {/* Hidden Video Input */}
@@ -1499,115 +2141,6 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
                 e.target.value = "";
               }}
             />
-
-            <button
-              onClick={() => fileUploadInputRef.current?.click()}
-              disabled={isStreaming || isUploading}
-              title="Upload files (video for script extraction, or any file to attach)"
-              style={{
-                flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                width: 32, height: 32, padding: 0,
-                background: "none", border: "none",
-                borderRadius: 9,
-                color: attachedFiles.length ? "var(--accent)" : "var(--text-muted)",
-                cursor: (isStreaming || isUploading) ? "not-allowed" : "pointer",
-                opacity: (isStreaming || isUploading) ? 0.5 : 1,
-                transition: "background 0.12s, color 0.12s",
-              }}
-              onMouseEnter={(e) => {
-                if (isStreaming || isUploading) return;
-                e.currentTarget.style.background = "var(--bg-hover)";
-                e.currentTarget.style.color = attachedFiles.length ? "var(--accent)" : "var(--text)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "none";
-                e.currentTarget.style.color = attachedFiles.length ? "var(--accent)" : "var(--text-muted)";
-              }}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-              </svg>
-            </button>
-            {isTts && (() => {
-              const modelIdStr = model?.modelId || "";
-              const isVoiceClone = isVoiceCloneModel(model?.provider, modelIdStr);
-              return (
-                <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  {isVoiceClone && (
-                    <button
-                      onClick={isRecording ? stopRecording : startRecording}
-                      disabled={isStreaming}
-                      title={isRecording ? "停止录音" : "麦克风录音 (可作为声音克隆音源)"}
-                      style={{
-                        flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                        width: 32, height: 32, padding: 0,
-                        background: isRecording ? "rgba(239,68,68,0.15)" : "none", border: "none",
-                        borderRadius: 9,
-                        color: isRecording ? "#ef4444" : "var(--text-muted)",
-                        cursor: isStreaming ? "not-allowed" : "pointer",
-                        opacity: isStreaming ? 0.5 : 1,
-                        transition: "background 0.12s, color 0.12s",
-                      }}
-                      onMouseEnter={(e) => {
-                        if (isStreaming) return;
-                        e.currentTarget.style.background = isRecording ? "rgba(239,68,68,0.2)" : "var(--bg-hover)";
-                        e.currentTarget.style.color = isRecording ? "#ef4444" : "var(--text)";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = isRecording ? "rgba(239,68,68,0.15)" : "none";
-                        e.currentTarget.style.color = isRecording ? "#ef4444" : "var(--text-muted)";
-                      }}
-                    >
-                      {isRecording ? (
-                        <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", width: 14, height: 14 }}>
-                          <style>{`
-                            @keyframes micPulse {
-                              0% { transform: scale(0.9); opacity: 0.5; }
-                              50% { transform: scale(1.3); opacity: 1; }
-                              100% { transform: scale(0.9); opacity: 0.5; }
-                            }
-                          `}</style>
-                          <span style={{ position: "absolute", width: 14, height: 14, borderRadius: "50%", background: "#ef4444", animation: "micPulse 1.2s infinite" }} />
-                          <span style={{ position: "absolute", width: 6, height: 6, borderRadius: "50%", background: "#fff" }} />
-                        </div>
-                      ) : (
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                          <line x1="12" y1="19" x2="12" y2="22" />
-                        </svg>
-                      )}
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setVoiceConsoleOpen(v => !v)}
-                    title="语音工坊设定"
-                    style={{
-                      flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                      width: 32, height: 32, padding: 0,
-                      background: voiceConsoleOpen ? "rgba(var(--accent-rgb), 0.12)" : "none", border: "none",
-                      borderRadius: 9,
-                      color: voiceConsoleOpen ? "var(--accent)" : "var(--text-muted)",
-                      cursor: "pointer",
-                      transition: "background 0.12s, color 0.12s",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = "var(--bg-hover)";
-                      e.currentTarget.style.color = "var(--text)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = voiceConsoleOpen ? "rgba(var(--accent-rgb), 0.12)" : "none";
-                      e.currentTarget.style.color = voiceConsoleOpen ? "var(--accent)" : "var(--text-muted)";
-                    }}
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="3" />
-                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                    </svg>
-                  </button>
-                </div>
-              );
-            })()}
             {/* Model selector — visible always, disabled during streaming */}
             {modelOptions.length > 0 && currentName && onModelChange && (
                 <div ref={dropdownRef} style={{ position: "relative" }}>
@@ -1709,7 +2242,482 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
                   })()}
                 </div>
             )}
+            {/* Design system selector */}
+            {designSystemList && designSystemList.length > 0 && onDesignSystemChange && (
+                <div ref={designDropdownRef} style={{ position: "relative" }}>
+                  <button
+                    onClick={(e) => {
+                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                      setDesignDropdownRect({ top: rect.top, left: rect.left, width: rect.width });
+                      setDesignDropdownOpen((v) => !v);
+                    }}
+                    disabled={isStreaming}
+                    title="选择设计系统"
+                    style={{
+                      display: "flex", alignItems: "center", gap: 6,
+                      padding: "8px 12px",
+                      height: 32,
+                      maxWidth: 200, overflow: "hidden",
+                      background: designDropdownOpen ? "var(--bg-hover)" : "none",
+                      border: "none",
+                      borderRadius: 9,
+                      color: "var(--text-muted)",
+                      cursor: isStreaming ? "not-allowed" : "pointer",
+                      fontSize: 12,
+                      opacity: isStreaming ? 0.5 : 1,
+                      transition: "background 0.12s, color 0.12s",
+                    }}
+                    onMouseEnter={(e) => {
+                      if (isStreaming) return;
+                      e.currentTarget.style.background = "var(--bg-hover)";
+                      e.currentTarget.style.color = "var(--text)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = designDropdownOpen ? "var(--bg-hover)" : "none";
+                      e.currentTarget.style.color = "var(--text-muted)";
+                    }}
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="13.5" cy="6.5" r="2.5" />
+                      <circle cx="17.5" cy="15.5" r="2.5" />
+                      <circle cx="8.5" cy="15.5" r="2.5" />
+                      <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z" />
+                    </svg>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                      {designSystem ? designSystemList.find(d => d.id === designSystem)?.name ?? designSystem : "Design"}
+                    </span>
+                  </button>
+                  {designDropdownOpen && designDropdownRect && (() => {
+                    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+                    const bottom = viewportHeight - designDropdownRect.top + 6;
+                    const maxH = Math.max(120, Math.min(designDropdownRect.top - 8, viewportHeight * 0.6));
+                    const grouped = designSystemList.reduce<Record<string, typeof designSystemList>>((acc, d) => {
+                      (acc[d.category] ||= []).push(d);
+                      return acc;
+                    }, {});
+                    return (
+                    <>
+                    <div style={{
+                      position: "fixed",
+                      bottom, left: designDropdownRect.left,
+                      zIndex: 500, background: "var(--bg)", border: "1px solid var(--border)",
+                      borderRadius: 8, boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
+                      overflow: "hidden", width: "max-content", minWidth: designDropdownRect.width, maxHeight: maxH, overflowY: "auto",
+                    }}>
+                      <button
+                        onClick={() => { setDesignDropdownOpen(false); onDesignSystemChange(null); }}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 8,
+                          width: "100%", padding: "7px 12px",
+                          background: !designSystem ? "var(--bg-selected)" : "none",
+                          border: "none",
+                          color: !designSystem ? "var(--text)" : "var(--text-muted)",
+                          cursor: "pointer", fontSize: 12, textAlign: "left",
+                          fontWeight: !designSystem ? 600 : 400,
+                          borderBottom: "1px solid var(--border)",
+                        }}
+                      >
+                        {!designSystem
+                          ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="1.5 5 4 7.5 8.5 2.5" /></svg>
+                          : <span style={{ width: 10, flexShrink: 0 }} />}
+                        <span style={{ flex: 1 }}>None</span>
+                      </button>
+                      {Object.entries(grouped).map(([category, items]) => (
+                        <div key={category}>
+                          <div style={{
+                            padding: "6px 12px 4px",
+                            fontSize: 10, fontWeight: 600, color: "var(--text-dim)",
+                            textTransform: "uppercase", letterSpacing: "0.07em",
+                            borderTop: "1px solid var(--border)",
+                          }}>
+                            {category}
+                          </div>
+                          {items.map((d) => {
+                            const isActive = d.id === designSystem;
+                            return (
+                              <button
+                                key={d.id}
+                                onClick={() => { setDesignDropdownOpen(false); if (!isActive) onDesignSystemChange(d.id); }}
+                                style={{
+                                  display: "flex", alignItems: "center", gap: 8,
+                                  width: "100%", padding: "7px 12px",
+                                  background: isActive ? "var(--bg-selected)" : "none",
+                                  border: "none",
+                                  color: isActive ? "var(--text)" : "var(--text-muted)",
+                                  cursor: "pointer", fontSize: 12, textAlign: "left",
+                                  fontWeight: isActive ? 600 : 400,
+                                  whiteSpace: "nowrap",
+                                }}
+                                onMouseEnter={(e) => { setPreviewDsId(d.id); if (!isActive) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                                onMouseLeave={(e) => { setPreviewDsId(null); if (!isActive) e.currentTarget.style.background = "none"; }}
+                              >
+                                {isActive
+                                  ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="1.5 5 4 7.5 8.5 2.5" /></svg>
+                                  : <span style={{ width: 10, flexShrink: 0 }} />}
+                                {d.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                    {previewDsId && designDropdownRect && (
+                      <div style={{
+                        position: "fixed",
+                        left: designDropdownRect.left + 340,
+                        bottom: (window.visualViewport?.height ?? window.innerHeight) - designDropdownRect.top + 6,
+                        width: 320, height: 200,
+                        zIndex: 600, borderRadius: 10, overflow: "hidden",
+                        border: "1px solid var(--border)",
+                        boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+                        pointerEvents: "none",
+                      }}>
+                        <iframe
+                          src={`/api/design-systems/${encodeURIComponent(previewDsId)}/preview`}
+                          style={{
+                            border: "none",
+                            width: "200%", height: "200%",
+                            transform: "scale(0.5)", transformOrigin: "top left",
+                          }}
+                          title={`Preview ${previewDsId}`}
+                          sandbox="allow-same-origin"
+                        />
+                      </div>
+                    )}
+                    </>
+                    );
+                })()}
+                </div>
+            )}
+
           </div>
+
+          {/* PPT Studio Button */}
+          {!isStreaming && onSend && (
+            <div ref={pptPanelRef} style={{ position: 'relative' }}>
+              <button
+                onClick={() => setPptPanelOpen(v => !v)}
+                title="HTML PPT Studio"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  padding: '8px 12px', height: 32,
+                  background: pptPanelOpen ? 'var(--bg-hover)' : 'none',
+                  border: 'none', borderRadius: 9,
+                  color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12,
+                  transition: 'background 0.12s, color 0.12s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-hover)'; e.currentTarget.style.color = 'var(--text)'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = pptPanelOpen ? 'var(--bg-hover)' : 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
+                </svg>
+                PPT
+              </button>
+
+              {pptPanelOpen && (
+                <div style={{
+                  position: 'absolute', bottom: '100%', left: 0, marginBottom: 8,
+                  width: 340, background: 'var(--bg-panel)', border: '1px solid var(--border)',
+                  borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.18)', zIndex: 500,
+                  padding: '16px', display: 'flex', flexDirection: 'column', gap: 12,
+                }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>HTML PPT Studio</div>
+
+                  {/* Topic */}
+                  <div>
+                    <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>主题 / 内容简述</label>
+                    <input
+                      type="text"
+                      placeholder="例：AI Agent 技术分享、2026 Q2 业绩复盘…"
+                      value={pptTopic}
+                      onChange={e => setPptTopic(e.target.value)}
+                      style={{
+                        width: '100%', padding: '8px 10px', fontSize: 12, boxSizing: 'border-box',
+                        border: '1px solid var(--border)', borderRadius: 7,
+                        background: 'var(--bg)', color: 'var(--text)', outline: 'none',
+                      }}
+                    />
+                  </div>
+
+                  {/* Audience */}
+                  <div>
+                    <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>受众（可选）</label>
+                    <input
+                      type="text"
+                      placeholder="例：工程师团队、VC 投资人、小红书用户…"
+                      value={pptAudience}
+                      onChange={e => setPptAudience(e.target.value)}
+                      style={{
+                        width: '100%', padding: '8px 10px', fontSize: 12, boxSizing: 'border-box',
+                        border: '1px solid var(--border)', borderRadius: 7,
+                        background: 'var(--bg)', color: 'var(--text)', outline: 'none',
+                      }}
+                    />
+                  </div>
+
+                  {/* Theme */}
+                  <div>
+                    <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>视觉主题</label>
+                    <select
+                      value={pptTheme}
+                      onChange={e => setPptTheme(e.target.value)}
+                      style={{
+                        width: '100%', padding: '8px 10px', fontSize: 12, boxSizing: 'border-box',
+                        border: '1px solid var(--border)', borderRadius: 7,
+                        background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer',
+                      }}
+                    >
+                      <optgroup label="深色 · 技术">
+                        <option value="tokyo-night">Tokyo Night — 蓝夜科技感</option>
+                        <option value="dracula">Dracula — 经典紫红深色</option>
+                        <option value="catppuccin-mocha">Catppuccin Mocha — 开发者友好深色</option>
+                        <option value="terminal-green">Terminal Green — 绿屏终端复古</option>
+                        <option value="nord">Nord — 北欧清冷蓝</option>
+                        <option value="gruvbox-dark">Gruvbox Dark — 暖棕复古深色</option>
+                        <option value="rose-pine">Rosé Pine — 柔和紫粉深色</option>
+                        <option value="vaporwave">Vaporwave — 蒸汽波霓虹紫</option>
+                        <option value="cyberpunk-neon">Cyberpunk Neon — 赛博霓虹</option>
+                      </optgroup>
+                      <optgroup label="浅色 · 专业">
+                        <option value="minimal-white">Minimal White — 极简白（内部汇报）</option>
+                        <option value="corporate-clean">Corporate Clean — 企业蓝正式汇报</option>
+                        <option value="pitch-deck-vc">Pitch Deck VC — YC 风融资路演</option>
+                        <option value="editorial-serif">Editorial Serif — 杂志风衬线高级感</option>
+                        <option value="academic-paper">Academic Paper — 学术论文风</option>
+                        <option value="swiss-grid">Swiss Grid — 瑞士网格 Helvetica</option>
+                        <option value="solarized-light">Solarized Light — 暖调浅色护眼</option>
+                        <option value="catppuccin-latte">Catppuccin Latte — 柔和奶咖浅色</option>
+                      </optgroup>
+                      <optgroup label="小红书 · 生活">
+                        <option value="xiaohongshu-white">小红书白 — 暖红衬线图文</option>
+                        <option value="soft-pastel">Soft Pastel — 马卡龙柔和</option>
+                        <option value="rainbow-gradient">Rainbow Gradient — 彩虹渐变欢乐</option>
+                        <option value="sunset-warm">Sunset Warm — 橘珊瑚渐变</option>
+                      </optgroup>
+                      <optgroup label="高冲击力 · 创意">
+                        <option value="neo-brutalism">Neo Brutalism — 厚描边硬阴影</option>
+                        <option value="glassmorphism">Glassmorphism — 毛玻璃苹果风</option>
+                        <option value="aurora">Aurora — 极光渐变</option>
+                        <option value="blueprint">Blueprint — 工程蓝图网格</option>
+                        <option value="y2k-chrome">Y2K Chrome — 千禧铬金属银</option>
+                        <option value="retro-tv">Retro TV — 复古显像管扫描线</option>
+                        <option value="news-broadcast">News Broadcast — 新闻播报风格</option>
+                        <option value="memphis-pop">Memphis Pop — 孟菲斯波普几何</option>
+                        <option value="magazine-bold">Magazine Bold — 杂志大标题冲击</option>
+                        <option value="japanese-minimal">Japanese Minimal — 和风极简侘寂</option>
+                        <option value="midcentury">Midcentury — 世纪中期现代复古</option>
+                        <option value="engineering-whiteprint">Engineering Whiteprint — 工程白图蓝线</option>
+                        <option value="arctic-cool">Arctic Cool — 冰川冷色石板蓝</option>
+                        <option value="bauhaus">Bauhaus — 包豪斯几何原色</option>
+                        <option value="sharp-mono">Sharp Mono — 锐利黑白高对比</option>
+                      </optgroup>
+                    </select>
+                  </div>
+
+                  {/* Template */}
+                  <div>
+                    <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Deck 模板（结构）</label>
+                    <select
+                      value={pptTemplate}
+                      onChange={e => setPptTemplate(e.target.value)}
+                      style={{
+                        width: '100%', padding: '8px 10px', fontSize: 12, boxSizing: 'border-box',
+                        border: '1px solid var(--border)', borderRadius: 7,
+                        background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer',
+                      }}
+                    >
+                      <option value="tech-sharing">Tech Sharing — 技术分享（封面/背景/方案/Demo/总结）</option>
+                      <option value="pitch-deck">Pitch Deck — 融资路演（问题/方案/市场/团队/融资）</option>
+                      <option value="product-launch">Product Launch — 产品发布（亮点/功能/对比/CTA）</option>
+                      <option value="weekly-report">Weekly Report — 周报复盘（目标/进展/风险/下周计划）</option>
+                      <option value="xhs-post">小红书图文 — 3:4 竖版图文（封面/内容/种草/结尾）</option>
+                      <option value="course-module">Course Module — 课程模块（学习目标/讲解/练习/小结）</option>
+                      <option value="presenter-mode-reveal">演讲者模式 — 含逐字稿（S键弹出提词器）</option>
+                    </select>
+                  </div>
+
+                  {/* Slides count */}
+                  <div>
+                    <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>页数：{pptSlides} 页</label>
+                    <input
+                      type="range" min={4} max={20} value={pptSlides}
+                      onChange={e => setPptSlides(Number(e.target.value))}
+                      style={{ width: '100%', accentColor: 'var(--accent)' }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
+                      <span>4</span><span>20</span>
+                    </div>
+                  </div>
+
+                  {/* Generate button */}
+                  <button
+                    disabled={!pptTopic.trim()}
+                    onClick={() => {
+                      if (!pptTopic.trim()) return;
+
+                      const templateDescMap: Record<string, string> = {
+                        'tech-sharing': 'tech-sharing（技术分享：封面 → 背景/问题 → 解决方案 → 核心模块讲解 × 3 → Demo/效果 → 总结/Q&A）',
+                        'pitch-deck': 'pitch-deck（融资路演：封面 → 问题 → 解决方案 → 市场规模 → 产品/Demo → 商业模式 → 竞争壁垒 → 团队 → 融资计划）',
+                        'product-launch': 'product-launch（产品发布：封面 → 痛点 → 产品亮点 → 核心功能 × 3 → 对比竞品 → 价格/CTA）',
+                        'weekly-report': 'weekly-report（周报复盘：封面 → 本周目标 → 完成进展 → 数据指标 → 风险/阻塞 → 下周计划）',
+                        'xhs-post': 'xhs-post（小红书图文 3:4 竖版：封面卡片 → 内容卡片 × 3-4 → 种草/结尾卡片）',
+                        'course-module': 'course-module（课程模块：封面 → 学习目标 → 知识讲解 × 3 → 案例/练习 → 小结/作业）',
+                        'presenter-mode-reveal': 'presenter-mode-reveal（演讲者模式：每页含 <div class="notes"> 逐字稿 150-300 字，S 键弹出提词器窗口）',
+                      };
+
+                      const prompt = `请用 html-ppt skill 生成一份完整的单文件 HTML 演示文稿。
+
+## 内容要求
+- 主题：${pptTopic}
+${pptAudience ? `- 目标受众：${pptAudience}` : ''}
+- 页数：${pptSlides} 页
+
+## 技术规格
+- 视觉主题：${pptTheme}（对应 assets/themes/${pptTheme}.css）
+- Deck 模板结构：${templateDescMap[pptTemplate] || pptTemplate}
+- 必须是**单文件 HTML**，所有 CSS/JS **inline 内嵌**，不引用外部文件
+- 完整实现键盘导航（← →）、幻灯片切换动画
+- 每张 slide 为 \`<section class="slide">\` 元素，默认隐藏只显示 .is-active
+
+## 输出规范
+- 输出一段话说明 deck 结构，然后直接给出完整 HTML
+- HTML 以 \`<!doctype html>\` 开头，\`</html>\` 结尾
+- 不要截断，必须完整输出所有 ${pptSlides} 页内容
+${pptTemplate === 'presenter-mode-reveal' ? '- 每页必须有 <div class="notes"> 逐字稿，150-300 字，口语风格' : ''}
+${pptTemplate === 'xhs-post' ? '- 使用 3:4 竖版尺寸（width:1080px, height:1440px），小红书图文卡片风格' : ''}`;
+
+                      onSend(prompt);
+                      setPptPanelOpen(false);
+                      setPptTopic('');
+                      setPptAudience('');
+                    }}
+                    style={{
+                      width: '100%', padding: '9px', fontSize: 13, fontWeight: 600,
+                      background: pptTopic.trim() ? 'var(--accent)' : 'var(--bg-hover)',
+                      color: pptTopic.trim() ? '#fff' : 'var(--text-muted)',
+                      border: 'none', borderRadius: 8, cursor: pptTopic.trim() ? 'pointer' : 'not-allowed',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    🎞 生成 PPT
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Prompt Presets Button */}
+          {!isStreaming && (
+            <div ref={presetDropdownRef} style={{ position: 'relative' }}>
+              <button
+                onClick={() => {
+                  if (!presetsAvailable) {
+                    setDownloadModalOpen(true);
+                    setDownloadStage("idle");
+                    setDownloadProgress(0);
+                    setDownloadMessage("");
+                    setDownloadError(null);
+                    return;
+                  }
+                  setPresetDropdownOpen(v => !v);
+                }}
+                title={presetsAvailable ? "提示词灵感预设" : "提示词灵感预设 (未检测到资源目录)"}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  padding: '8px 12px', height: 32,
+                  background: presetsAvailable && presetDropdownOpen ? 'var(--bg-hover)' : 'none',
+                  border: 'none', borderRadius: 9,
+                  color: presetsAvailable ? 'var(--text-muted)' : 'var(--text-dim)',
+                  opacity: presetsAvailable ? 1 : 0.4,
+                  cursor: 'pointer', fontSize: 12,
+                  transition: 'background 0.12s, color 0.12s, opacity 0.12s',
+                }}
+                onMouseEnter={e => {
+                  if (presetsAvailable) {
+                    e.currentTarget.style.background = 'var(--bg-hover)';
+                    e.currentTarget.style.color = 'var(--text)';
+                  }
+                }}
+                onMouseLeave={e => {
+                  if (presetsAvailable) {
+                    e.currentTarget.style.background = presetDropdownOpen ? 'var(--bg-hover)' : 'none';
+                    e.currentTarget.style.color = 'var(--text-muted)';
+                  }
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z" />
+                </svg>
+                灵感
+              </button>
+
+              {presetsAvailable && presetDropdownOpen && (() => {
+                const categories = [...new Set(allPresets.map(p => p.category))];
+                return (
+                  <div style={{
+                    position: 'absolute', bottom: 'calc(100% + 8px)', left: 0,
+                    zIndex: 400,
+                    background: 'color-mix(in srgb, var(--bg-panel) 92%, transparent)',
+                    backdropFilter: 'blur(16px)',
+                    WebkitBackdropFilter: 'blur(16px)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 16,
+                    boxShadow: '0 12px 32px rgba(0, 0, 0, 0.25)',
+                    padding: 8,
+                    width: 280,
+                    maxHeight: 340,
+                    overflowY: 'auto',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 2,
+                    animation: 'drop-zone-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+                  }}>
+                    {categories.map(cat => (
+                      <div key={cat}>
+                        <div style={{
+                          padding: '6px 10px 4px',
+                          fontSize: 10, fontWeight: 600, color: 'var(--text-dim)',
+                          textTransform: 'uppercase', letterSpacing: '0.07em',
+                        }}>
+                          {cat} ({allPresets.filter(p => p.category === cat).length})
+                        </div>
+                        {allPresets.filter(p => p.category === cat).slice(0, 20).map(preset => (
+                          <button
+                            key={preset.id}
+                            onClick={() => {
+                              setPresetDropdownOpen(false);
+                              setActivePreset(preset);
+                              const args = parsePlaceholders(preset.template);
+                              const initVals: Record<string, string> = {};
+                              for (const a of args) initVals[a.key] = a.defaultValue;
+                              setPlaceholderValues(initVals);
+                              setPromptModalText(preset.template);
+                              setPromptModalOpen(true);
+                              setCopySuccess(false);
+                              setPromptTab('text');
+                            }}
+                            style={{
+                              display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+                              width: '100%', padding: '7px 10px',
+                              background: 'none', border: 'none', borderRadius: 10,
+                              color: 'var(--text)', cursor: 'pointer', textAlign: 'left',
+                              gap: 2, transition: 'background 0.12s',
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-hover)'; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
+                          >
+                            <span style={{ fontSize: 12.5, fontWeight: 600 }}>{preset.name}</span>
+                            <span style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.4 }}>{preset.description}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
 
           {/* spacer */}
           <div style={{ flex: 1 }} />
@@ -1751,7 +2759,12 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
                     <line x1="8" y1="21" x2="11" y2="21" />
                   </svg>
                   <span>{(() => {
-                    const lvl = thinkingLevel ?? "auto";
+                    const rawLvl = thinkingLevel ?? "auto";
+                    const lvl = (
+                      rawLvl === "auto" ||
+                      !availableThinkingLevels ||
+                      availableThinkingLevels.includes(rawLvl)
+                    ) ? rawLvl : "auto";
                     if (lvl === "auto" || !thinkingLevelMap) return lvl;
                     const mapped = thinkingLevelMap[lvl];
                     return mapped != null ? mapped : lvl;
@@ -2005,10 +3018,131 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
         </div>
       </div>
 
-      {/* 🪄 Premium Image Reverse-Prompt Modal */}
+      {/* 🪄 Premium Image Reverse-Prompt / Preset Modal */}
       {promptModalOpen && (() => {
         const jsonText = parseDescriptionToJSON(promptModalText);
-        const activeText = promptTab === "text" ? promptModalText : jsonText;
+        const rawText = promptTab === "text" ? promptModalText : jsonText;
+        const parsedArgs = parsePlaceholders(rawText);
+        const activeText = parsedArgs.length > 0 ? replacePlaceholders(rawText, placeholderValues) : rawText;
+        const hasImage = !!activePreset?.imagePath;
+        let imageUrl = null;
+        if (hasImage && activePreset?.imagePath) {
+          const isAbsolute = activePreset.imagePath.startsWith("/") || 
+                            activePreset.imagePath.startsWith("\\") || 
+                            /^[a-zA-Z]:/.test(activePreset.imagePath);
+          const finalPath = isAbsolute ? activePreset.imagePath : (cwd ? joinFilePath(cwd, activePreset.imagePath) : null);
+          if (finalPath) {
+            imageUrl = `/api/files/${encodeFilePathForApi(finalPath)}?type=read`;
+          }
+        }
+
+        const closeModal = () => {
+          setPromptModalOpen(false);
+          setActivePreset(null);
+          setPlaceholderValues({});
+        };
+
+        const insertAndClose = () => {
+          setValue((v) => v + (v ? "\n\n" : "") + activeText);
+          closeModal();
+          requestAnimationFrame(() => {
+            if (textareaRef.current) {
+              textareaRef.current.focus();
+              textareaRef.current.style.height = "auto";
+              textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+            }
+          });
+        };
+
+        const rightPanel = (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, minHeight: 0, flex: 1 }}>
+            {/* Tabs */}
+            <div style={{ display: "flex", gap: 16, flexShrink: 0 }}>
+              <button
+                onClick={() => setPromptTab("text")}
+                style={{
+                  padding: "8px 4px",
+                  border: "none",
+                  borderBottom: `2px solid ${promptTab === "text" ? "var(--accent)" : "transparent"}`,
+                  background: "none",
+                  color: promptTab === "text" ? "var(--text)" : "var(--text-muted)",
+                  fontSize: 13, fontWeight: 600, cursor: "pointer",
+                  transition: "color 0.15s, border-color 0.15s",
+                }}
+              >文本格式</button>
+              <button
+                onClick={() => setPromptTab("json")}
+                style={{
+                  padding: "8px 4px",
+                  border: "none",
+                  borderBottom: `2px solid ${promptTab === "json" ? "var(--accent)" : "transparent"}`,
+                  background: "none",
+                  color: promptTab === "json" ? "var(--text)" : "var(--text-muted)",
+                  fontSize: 13, fontWeight: 600, cursor: "pointer",
+                  transition: "color 0.15s, border-color 0.15s",
+                }}
+              >JSON 格式</button>
+            </div>
+
+            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+              {hasImage
+                ? `预设：${activePreset?.name ?? ""}`
+                : promptTab === "text"
+                  ? "视觉大模型已为您反推解析出以下结构化文本提示词："
+                  : "已将提示词自动分词并重构为以下 image_prompt JSON 结构："}
+            </div>
+
+            {/* Variable Editor */}
+            {parsedArgs.length > 0 && (
+              <div style={{
+                display: "flex", flexDirection: "column", gap: 6,
+                padding: 10,
+                background: "rgba(99,102,241,0.04)",
+                border: "1px solid rgba(99,102,241,0.15)",
+                borderRadius: 10,
+                maxHeight: hasImage ? 160 : undefined,
+                overflowY: "auto",
+              }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "rgb(99,102,241)", display: "flex", alignItems: "center", gap: 5 }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+                  </svg>
+                  可编辑变量 ({parsedArgs.length})
+                </div>
+                {parsedArgs.map((arg) => (
+                  <div key={arg.key} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <label style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 500 }}>{arg.name}</label>
+                    <input
+                      type="text"
+                      value={placeholderValues[arg.key] ?? arg.defaultValue}
+                      onChange={(e) => setPlaceholderValues(prev => ({ ...prev, [arg.key]: e.target.value }))}
+                      placeholder={arg.defaultValue || arg.name}
+                      style={{
+                        padding: "5px 7px", fontSize: 11.5, borderRadius: 6,
+                        border: "1px solid var(--border)", background: "var(--bg)",
+                        color: "var(--text)", outline: "none", transition: "border-color 0.15s",
+                      }}
+                      onFocus={(e) => { e.currentTarget.style.borderColor = "var(--accent)"; }}
+                      onBlur={(e) => { e.currentTarget.style.borderColor = "var(--border)"; }}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <textarea
+              readOnly
+              value={activeText}
+              style={{
+                width: "100%", flex: 1, minHeight: hasImage ? 100 : 140,
+                padding: 10, background: "var(--bg)", border: "1px solid var(--border)",
+                borderRadius: 10, fontSize: 12, lineHeight: "1.6", color: "var(--text)",
+                resize: "none", outline: "none",
+                fontFamily: promptTab === "json" ? "var(--font-mono), monospace" : "inherit",
+              }}
+            />
+          </div>
+        );
 
         return (
           <div style={{
@@ -2019,13 +3153,11 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
             animation: "fadeIn 0.2s ease-out",
           }}>
             <style>{`
-              @keyframes fadeIn {
-                from { opacity: 0; }
-                to { opacity: 1; }
-              }
-              @keyframes scaleIn {
-                from { transform: scale(0.96); opacity: 0; }
-                to { transform: scale(1); opacity: 1; }
+              @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+              @keyframes scaleIn { from { transform: scale(0.96); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+              @media (max-width: 640px) {
+                .pi-preset-grid { grid-template-columns: 1fr !important; }
+                .pi-preset-grid > div:first-child { border-right: none !important; border-bottom: 1px solid var(--border); max-height: 200px; }
               }
             `}</style>
             <div style={{
@@ -2033,63 +3165,29 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
               border: "1px solid var(--border)",
               borderRadius: 16,
               width: "100%",
-              maxWidth: 560,
+              maxWidth: hasImage ? 900 : 560,
+              maxHeight: "90vh",
               boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
               display: "flex",
               flexDirection: "column",
               animation: "scaleIn 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)",
               overflow: "hidden",
             }}>
-              {/* Header with Tabs */}
+              {/* Header */}
               <div style={{
-                display: "flex",
-                borderBottom: "1px solid var(--border)",
-                background: "rgba(255,255,255,0.02)",
-                padding: "0 20px",
-                alignItems: "center",
-                justifyContent: "space-between",
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "14px 20px", borderBottom: "1px solid var(--border)",
+                background: "rgba(255,255,255,0.02)", flexShrink: 0,
               }}>
-                <div style={{ display: "flex", gap: 16 }}>
-                  <button
-                    onClick={() => setPromptTab("text")}
-                    style={{
-                      padding: "16px 4px",
-                      border: "none",
-                      borderBottom: `2px solid ${promptTab === "text" ? "var(--accent)" : "transparent"}`,
-                      background: "none",
-                      color: promptTab === "text" ? "var(--text)" : "var(--text-muted)",
-                      fontSize: 14,
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      transition: "color 0.15s, border-color 0.15s",
-                    }}
-                  >
-                    文本格式
-                  </button>
-                  <button
-                    onClick={() => setPromptTab("json")}
-                    style={{
-                      padding: "16px 4px",
-                      border: "none",
-                      borderBottom: `2px solid ${promptTab === "json" ? "var(--accent)" : "transparent"}`,
-                      background: "none",
-                      color: promptTab === "json" ? "var(--text)" : "var(--text-muted)",
-                      fontSize: 14,
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      transition: "color 0.15s, border-color 0.15s",
-                    }}
-                  >
-                    JSON 格式
-                  </button>
-                </div>
-                
+                <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {hasImage ? (activePreset?.name ?? "提示词预设") : "🪄 图像反推提示词"}
+                </span>
                 <button
-                  onClick={() => setPromptModalOpen(false)}
+                  onClick={closeModal}
                   style={{
                     background: "none", border: "none", color: "var(--text-muted)",
                     cursor: "pointer", display: "flex", alignItems: "center", padding: 4,
-                    borderRadius: "50%", transition: "background 0.15s",
+                    borderRadius: "50%", transition: "background 0.15s", flexShrink: 0, marginLeft: 12,
                   }}
                   onMouseEnter={(e) => e.currentTarget.style.background = "var(--bg-hover)"}
                   onMouseLeave={(e) => e.currentTarget.style.background = "none"}
@@ -2100,112 +3198,110 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
                 </button>
               </div>
 
-              {/* Content Body */}
-              <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
-                <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
-                  {promptTab === "text" 
-                    ? "视觉大模型已为您反推解析出以下结构化文本提示词：" 
-                    : "已将提示词自动分词并重构为以下 image_prompt JSON 结构："}
-                </div>
-                <textarea
-                  readOnly
-                  value={activeText}
-                  style={{
-                    width: "100%",
-                    height: 220,
-                    padding: 12,
-                    background: "var(--bg)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 10,
-                    fontSize: 13,
-                    lineHeight: "1.6",
-                    color: "var(--text)",
-                    resize: "none",
-                    outline: "none",
-                    fontFamily: promptTab === "json" ? "var(--font-mono), monospace" : "inherit",
-                  }}
-                />
-              </div>
+              {/* Body: dual-column or single-column */}
+              {hasImage ? (
+                <div className="pi-preset-grid" style={{
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0, 45%) minmax(0, 55%)",
+                  flex: 1, minHeight: 0, overflow: "hidden",
+                }}>
+                  {/* Left: Image Preview */}
+                  <div style={{
+                    position: "relative", overflow: "hidden",
+                    borderRight: "1px solid var(--border)",
+                    background: "rgba(0,0,0,0.03)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    padding: 16,
+                  }}>
+                    {imageUrl ? (
+                      <div style={{
+                        width: "100%", borderRadius: 12, overflow: "hidden",
+                        boxShadow: "0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.08)",
+                      }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={imageUrl}
+                          alt={activePreset?.name ?? "预设效果图"}
+                          style={{
+                            width: "100%", display: "block", objectFit: "cover",
+                            maxHeight: "calc(90vh - 160px)",
+                          }}
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = "none";
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, color: "var(--text-dim)", textAlign: "center" }}>
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.3, marginBottom: 8 }}>
+                          <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" />
+                        </svg>
+                        <div>无效果图</div>
+                      </div>
+                    )}
+                    {/* Category badge */}
+                    {activePreset?.category && (
+                      <div style={{
+                        position: "absolute", top: 12, left: 12,
+                        padding: "3px 8px", borderRadius: 6,
+                        background: "rgba(0,0,0,0.55)", backdropFilter: "blur(8px)",
+                        color: "#fff", fontSize: 10, fontWeight: 600,
+                        letterSpacing: "0.03em",
+                      }}>
+                        {activePreset.category}
+                      </div>
+                    )}
+                  </div>
 
-              {/* Footer Actions */}
+                  {/* Right: Editor */}
+                  <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10, overflowY: "auto", minHeight: 0 }}>
+                    {rightPanel}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto", flex: 1, minHeight: 0 }}>
+                  {rightPanel}
+                </div>
+              )}
+
+              {/* Footer */}
               <div style={{
-                padding: "16px 20px",
-                borderTop: "1px solid var(--border)",
-                background: "rgba(255,255,255,0.01)",
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: 10,
+                padding: "14px 20px", borderTop: "1px solid var(--border)",
+                background: "rgba(255,255,255,0.01)", display: "flex",
+                justifyContent: "flex-end", gap: 10, flexShrink: 0,
               }}>
                 <button
-                  onClick={() => {
-                    setValue((v) => v + (v ? "\n\n" : "") + activeText);
-                    setPromptModalOpen(false);
-                    requestAnimationFrame(() => {
-                      if (textareaRef.current) {
-                        textareaRef.current.focus();
-                        textareaRef.current.style.height = "auto";
-                        textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
-                      }
-                    });
-                  }}
+                  onClick={insertAndClose}
                   style={{
                     padding: "8px 16px",
-                    background: "rgba(129,140,248,0.1)",
-                    border: "1px solid rgba(129,140,248,0.25)",
-                    borderRadius: 8,
-                    color: "rgb(99,102,241)",
-                    cursor: "pointer",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    transition: "background 0.12s",
+                    background: "rgba(129,140,248,0.1)", border: "1px solid rgba(129,140,248,0.25)",
+                    borderRadius: 8, color: "rgb(99,102,241)", cursor: "pointer",
+                    fontSize: 13, fontWeight: 600, transition: "background 0.12s",
                   }}
                   onMouseEnter={(e) => e.currentTarget.style.background = "rgba(129,140,248,0.18)"}
                   onMouseLeave={(e) => e.currentTarget.style.background = "rgba(129,140,248,0.1)"}
-                >
-                  插入到输入框
-                </button>
+                >插入到输入框</button>
                 <button
                   onClick={async () => {
                     try {
                       await navigator.clipboard.writeText(activeText);
                       setCopySuccess(true);
                       setTimeout(() => setCopySuccess(false), 2000);
-                    } catch (err) {
-                      console.error("Failed to copy text:", err);
-                    }
+                    } catch (err) { console.error("Failed to copy text:", err); }
                   }}
                   style={{
-                    padding: "8px 18px",
-                    background: copySuccess ? "#10B981" : "var(--accent)",
-                    border: "none",
-                    borderRadius: 8,
-                    color: "#fff",
-                    cursor: "pointer",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
+                    padding: "8px 18px", background: copySuccess ? "#10B981" : "var(--accent)",
+                    border: "none", borderRadius: 8, color: "#fff", cursor: "pointer",
+                    fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6,
                     transition: "background 0.15s",
                   }}
                   onMouseEnter={(e) => { if (!copySuccess) e.currentTarget.style.filter = "brightness(1.15)"; }}
                   onMouseLeave={(e) => { e.currentTarget.style.filter = "none"; }}
                 >
                   {copySuccess ? (
-                    <>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                      已复制！
-                    </>
+                    <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>已复制！</>
                   ) : (
-                    <>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                      </svg>
-                      复制提示词
-                    </>
+                    <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>复制提示词</>
                   )}
                 </button>
               </div>
@@ -2213,6 +3309,174 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
           </div>
         );
       })()}
+
+      {/* 📥 Presets Automatic Download Progress Modal */}
+      {downloadModalOpen && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0, 0, 0, 0.65)', backdropFilter: 'blur(8px)',
+          zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            background: 'var(--bg-panel)', border: '1px solid var(--border)',
+            borderRadius: 16, width: '450px', maxWidth: '90%', padding: '24px',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 10px 10px -5px rgba(0, 0, 0, 0.2)',
+            display: 'flex', flexDirection: 'column', gap: 20,
+          }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--text)' }}>
+                  下载提示词灵感预设资源
+                </h3>
+              </div>
+              {downloadStage !== 'downloading' && downloadStage !== 'extracting' && (
+                <button
+                  onClick={() => setDownloadModalOpen(false)}
+                  style={{
+                    background: 'none', border: 'none', color: 'var(--text-muted)',
+                    cursor: 'pointer', padding: 4, display: 'flex', borderRadius: 4,
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              )}
+            </div>
+
+            {/* Content */}
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: '1.5' }}>
+              {downloadStage === 'idle' && (
+                <div>
+                  <p style={{ margin: '0 0 12px 0' }}>
+                    未检测到灵感预设目录 <code>awesome-gpt-image-2-API-and-Prompts-main</code>。
+                  </p>
+                  <p style={{ margin: '0 0 12px 0' }}>
+                    是否立即开始自动下载资源包？为了节省您的磁盘空间，系统在解压时将<strong>仅提取 cases 和 images 目录</strong>，过滤掉其它无关内容。
+                  </p>
+                  <p style={{ margin: 0, fontSize: 11, color: 'var(--text-dim)' }}>
+                    项目源地址: <a href="https://github.com/demon820308/awesome-gpt-image-2-API-and-Prompts" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>GitHub Repo</a>
+                  </p>
+                </div>
+              )}
+
+              {(downloadStage === 'downloading' || downloadStage === 'extracting') && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 500, color: 'var(--text)' }}>
+                    <span>
+                      {downloadStage === 'downloading' ? '正在下载资源包...' : '正在解压并精简文件...'}
+                    </span>
+                    <span>{downloadProgress}%</span>
+                  </div>
+                  
+                  {/* Progress Bar Container */}
+                  <div style={{
+                    width: '100%', height: 8, background: 'var(--bg-hover)',
+                    borderRadius: 4, overflow: 'hidden', position: 'relative'
+                  }}>
+                    <div style={{
+                      width: `${downloadProgress}%`, height: '100%',
+                      background: 'var(--accent)', borderRadius: 4,
+                      transition: 'width 0.2s ease-out'
+                    }} />
+                  </div>
+
+                  <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 4, wordBreak: 'break-all' }}>
+                    {downloadMessage}
+                  </div>
+                </div>
+              )}
+
+              {downloadStage === 'done' && (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '10px 0', color: '#10B981' }}>
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                  <span style={{ fontWeight: 600 }}>资源已成功安装并启用！</span>
+                </div>
+              )}
+
+              {downloadStage === 'error' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, color: '#EF4444' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+                    </svg>
+                    <span>下载或安装失败</span>
+                  </div>
+                  <div style={{ fontSize: 12, background: 'rgba(239, 68, 68, 0.08)', padding: 10, borderRadius: 8, border: '1px solid rgba(239, 68, 68, 0.2)', wordBreak: 'break-all' }}>
+                    {downloadError}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer / Buttons */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              {downloadStage === 'idle' && (
+                <>
+                  <button
+                    onClick={() => setDownloadModalOpen(false)}
+                    style={{
+                      padding: '8px 16px', background: 'none', border: '1px solid var(--border)',
+                      borderRadius: 8, color: 'var(--text)', cursor: 'pointer', fontSize: 12, fontWeight: 600
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={startPresetsDownload}
+                    style={{
+                      padding: '8px 16px', background: 'var(--accent)', border: 'none',
+                      borderRadius: 8, color: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 600
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.filter = 'brightness(1.15)'}
+                    onMouseLeave={e => e.currentTarget.style.filter = 'none'}
+                  >
+                    开始自动下载
+                  </button>
+                </>
+              )}
+              {downloadStage === 'error' && (
+                <>
+                  <button
+                    onClick={() => setDownloadModalOpen(false)}
+                    style={{
+                      padding: '8px 16px', background: 'none', border: '1px solid var(--border)',
+                      borderRadius: 8, color: 'var(--text)', cursor: 'pointer', fontSize: 12, fontWeight: 600
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                  >
+                    关闭
+                  </button>
+                  <button
+                    onClick={startPresetsDownload}
+                    style={{
+                      padding: '8px 16px', background: 'var(--accent)', border: 'none',
+                      borderRadius: 8, color: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 600
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.filter = 'brightness(1.15)'}
+                    onMouseLeave={e => e.currentTarget.style.filter = 'none'}
+                  >
+                    重试
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 });

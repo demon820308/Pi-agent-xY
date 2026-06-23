@@ -3,11 +3,14 @@ import { AuthStorage, ModelRegistry, SettingsManager, getAgentDir } from "@earen
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { writeFileSync, readFileSync, existsSync } from "fs";
 import { join } from "path";
-import { triggerBackgroundModelsSync, loadCache } from "../../../lib/model-resolver";
+import { triggerBackgroundModelsSync, loadCache, syncModelsInternal } from "../../../lib/model-resolver";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const shouldSync = searchParams.get("sync") === "true";
+
   const nameMap = new Map<string, string>();
   let modelList: { id: string; name: string; provider: string; supportsVision?: boolean }[] = [];
   let defaultModel: { provider: string; modelId: string } | null = null;
@@ -18,6 +21,22 @@ export async function GET() {
     const agentDir = getAgentDir();
     const authStorage = AuthStorage.create();
     const registry = ModelRegistry.create(authStorage);
+
+    if (shouldSync) {
+      try {
+        await syncModelsInternal(registry, true);
+      } catch (e) {
+        console.error("[api/models] Failed to force sync models:", e);
+      }
+    } else {
+      // Trigger background synchronization of models list from active providers
+      try {
+        triggerBackgroundModelsSync(registry);
+      } catch (e) {
+        console.error("[api/models] Failed to trigger background models sync:", e);
+      }
+    }
+
     const available = registry.getAvailable();
     modelList = available.map((m) => ({
       id: m.id,
@@ -32,13 +51,6 @@ export async function GET() {
       if (m.thinkingLevelMap) thinkingLevelMaps[key] = m.thinkingLevelMap;
     }
     // Post-process / augment model lists
-    
-    // Trigger background synchronization of models list from active providers
-    try {
-      triggerBackgroundModelsSync(registry);
-    } catch (e) {
-      console.error("[api/models] Failed to trigger background models sync:", e);
-    }
 
     // Merge cached models into the model list
     try {
@@ -107,7 +119,11 @@ export async function GET() {
         });
         const key = `${provider}:${model.id}`;
         nameMap.set(key, model.name);
-        thinkingLevels[key] = ["off"];
+        const idLower = model.id.toLowerCase();
+        const isReasoningModel = idLower.includes("pro") || idLower.includes("omni");
+        thinkingLevels[key] = isReasoningModel
+          ? ["auto", "off", "minimal", "low", "medium", "high", "xhigh"]
+          : ["off"];
       }
     }
 
@@ -116,6 +132,34 @@ export async function GET() {
     const modelId = settings.getDefaultModel();
     if (provider) {
       defaultModel = { provider, modelId: modelId ?? available[0]?.id ?? "" };
+    }
+
+    // Scan local models directory and append downloaded ones
+    const localModelsDir = join(agentDir, "local-models");
+    const localTtsConfigs = [
+      { id: "voxcpm2-local-tts-voiceclone", name: "VoxCPM2 (本地克隆)", key: "VOXCPM2" },
+      { id: "cosyvoice-local-tts-voiceclone", name: "CosyVoice (本地克隆)", key: "COSYVOICE" },
+      { id: "gptsovits-local-tts-voiceclone", name: "GPT-SoVITS (本地克隆)", key: "GPT-SOVITS" }
+    ];
+
+    for (const conf of localTtsConfigs) {
+      const statusFile = join(localModelsDir, conf.key, ".status.json");
+      if (existsSync(statusFile)) {
+        try {
+          const data = JSON.parse(readFileSync(statusFile, "utf-8"));
+          if (data.status === "completed") {
+            modelList.push({
+              id: conf.id,
+              name: conf.name,
+              provider: "local-tts",
+              supportsVision: false
+            });
+            const key = `local-tts:${conf.id}`;
+            nameMap.set(key, conf.name);
+            thinkingLevels[key] = ["off"];
+          }
+        } catch {}
+      }
     }
   } catch { /* return empty */ }
 

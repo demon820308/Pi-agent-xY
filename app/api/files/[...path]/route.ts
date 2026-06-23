@@ -127,6 +127,13 @@ function filePathFromSegments(segments: string[]): string {
   return "/" + joined.replace(/^\/+/, "");
 }
 
+function getWorkspaceCwd(sessionCwd: string | null | undefined): string | null {
+  if (!sessionCwd) return null;
+  const normalized = sessionCwd.replace(/\\/g, "/");
+  const match = normalized.match(/(.*?)\/Temp\/[^/]+$/i);
+  return match ? match[1] : sessionCwd;
+}
+
 async function getAllowedRoots(): Promise<Set<string>> {
   const now = Date.now();
   const cached = globalThis.__piAllowedRootsCache;
@@ -134,8 +141,13 @@ async function getAllowedRoots(): Promise<Set<string>> {
 
   const sessions = await listAllSessions();
   const roots = new Set<string>();
+  roots.add(process.cwd());
   for (const s of sessions) {
-    if (s.cwd) roots.add(s.cwd);
+    if (s.cwd) {
+      roots.add(s.cwd);
+      const wsCwd = getWorkspaceCwd(s.cwd);
+      if (wsCwd) roots.add(wsCwd);
+    }
   }
   // Also allow ~/pi-cwd-* directories created by the default-cwd endpoint
   const home = (await import("os")).homedir();
@@ -406,6 +418,18 @@ export async function POST(
 ) {
   try {
     const { path: segments } = await params;
+    if (segments.length === 1 && segments[0] === "allow") {
+      const { path: targetPath } = await request.json() as { path: string };
+      if (targetPath) {
+        if (!globalThis.__piAllowedRootsCache) {
+          await getAllowedRoots();
+        }
+        globalThis.__piAllowedRootsCache?.roots.add(targetPath);
+        console.log(`[files/route] Dynamically allowed root path: ${targetPath}`);
+        return NextResponse.json({ success: true });
+      }
+    }
+
     const filePath = filePathFromSegments(segments);
 
     const allowedRoots = await getAllowedRoots();

@@ -2,6 +2,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import type { GemProfile } from "./types";
+import { PPT_GEM_DEFAULTS } from "./ppt-gem";
 
 export function getGemsFilePath(): string {
   return join(getAgentDir(), "gem_xy.json");
@@ -10,11 +11,19 @@ export function getGemsFilePath(): string {
 export function readGems(): GemProfile[] {
   const filePath = getGemsFilePath();
   if (!existsSync(filePath)) {
-    return [];
+    const initialPresets = [
+      { id: "ppt-master-preset", ...PPT_GEM_DEFAULTS, created: new Date().toISOString(), modified: new Date().toISOString() }
+    ];
+    return initialPresets as GemProfile[];
   }
   try {
     const data = readFileSync(filePath, "utf-8");
-    return JSON.parse(data) as GemProfile[];
+    const gems = JSON.parse(data) as GemProfile[];
+    // Ensure PPT preset is always present
+    if (!gems.some(g => g.id === "ppt-master-preset")) {
+      gems.unshift({ id: "ppt-master-preset", ...PPT_GEM_DEFAULTS, created: new Date().toISOString(), modified: new Date().toISOString() } as GemProfile);
+    }
+    return gems;
   } catch (error) {
     console.error("Failed to read gem_xy.json:", error);
     return [];
@@ -51,6 +60,14 @@ export function saveGem(gemData: Partial<GemProfile> & { name: string; systemPro
     if (gemData.name === "Gem-xY 文案助手" && gemData.id !== existingPreset.id) {
       throw new Error("不能创建同名智能体 \"Gem-xY 文案助手\"");
     }
+  }
+
+  // Protect PPT preset from modifications
+  if (gemData.id === "ppt-master-preset") {
+    throw new Error("不能修改预置的 \"Gem-xY PPT 排版大师\" 智能体");
+  }
+  if (gemData.name === "Gem-xY PPT 排版大师" && gemData.id !== "ppt-master-preset") {
+    throw new Error("不能创建同名智能体 \"Gem-xY PPT 排版大师\"");
   }
 
   let targetGem: GemProfile;
@@ -109,6 +126,9 @@ export function deleteGem(id: string): boolean {
   const target = gems.find((g) => g.id === id);
   if (target && target.name === "Gem-xY 文案助手") {
     throw new Error("不能删除预置的 \"Gem-xY 文案助手\" 智能体");
+  }
+  if (id === "ppt-master-preset") {
+    throw new Error("不能删除预置的 \"Gem-xY PPT 排版大师\" 智能体");
   }
 
   const initialLength = gems.length;

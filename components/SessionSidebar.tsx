@@ -1,8 +1,23 @@
 "use client";
 
+function stripHiddenDirectives(text: string): string {
+  if (!text) return "";
+  let cleaned = text.replace(/<!--\s*PI_HIDDEN_START\s*-->[\s\S]*?<!--\s*PI_HIDDEN_END\s*-->/g, "");
+  cleaned = cleaned.replace(/<!--\s*PI_HIDDEN_START\s*-->[\s\S]*/g, "");
+  cleaned = cleaned.replace(/<!--\s*PI_FILE_ATTACHMENTS_START\s*-->[\s\S]*/g, "");
+  return cleaned.trim();
+}
+
 import { useEffect, useState, useCallback, useRef } from "react";
 import type { SessionInfo } from "@/lib/types";
 import { FileExplorer } from "./FileExplorer";
+
+function getWorkspaceCwd(sessionCwd: string | null | undefined): string {
+  if (!sessionCwd) return "";
+  const normalized = sessionCwd.replace(/\\/g, "/");
+  const match = normalized.match(/(.*?)\/Temp\/[^/]+$/i);
+  return match ? match[1] : sessionCwd;
+}
 
 interface Props {
   selectedSessionId: string | null;
@@ -40,9 +55,10 @@ function getRecentCwds(sessions: SessionInfo[]): string[] {
   const latestByCwd = new Map<string, string>(); // cwd -> most recent modified
   for (const s of sessions) {
     if (!s.cwd) continue;
-    const prev = latestByCwd.get(s.cwd);
+    const wsCwd = getWorkspaceCwd(s.cwd) || s.cwd;
+    const prev = latestByCwd.get(wsCwd);
     if (!prev || s.modified > prev) {
-      latestByCwd.set(s.cwd, s.modified);
+      latestByCwd.set(wsCwd, s.modified);
     }
   }
   return [...latestByCwd.entries()]
@@ -213,6 +229,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCwd, setSelectedCwd] = useState<string | null>(null);
+  const [registeredCwd, setRegisteredCwd] = useState<string | null>(null);
   const [homeDir, setHomeDir] = useState<string>("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [customPathOpen, setCustomPathOpen] = useState(false);
@@ -236,7 +253,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       const res = await fetch("/api/gem-xy");
       if (!res.ok) throw new Error("Failed to load Gem-xY profiles");
       const data = await res.json() as GemProfile[];
-      setGems(data.filter((g) => g.name !== "Gem-xY 文案助手"));
+      setGems(data.filter((g) => g.name !== "Gem-xY 文案助手" && g.id !== "ppt-master-preset"));
     } catch (e) {
       console.error(e);
     }
@@ -323,7 +340,23 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   useEffect(() => {
     onCwdChange?.(selectedCwd);
-  }, [selectedCwd, onCwdChange]);
+    const targetCwd = selectedCwdProp || selectedCwd;
+    if (targetCwd) {
+      fetch("/api/files/allow", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: targetCwd }),
+      })
+        .then((res) => {
+          if (res.ok) {
+            setRegisteredCwd(targetCwd);
+          }
+        })
+        .catch((e) => console.error("[SessionSidebar] Failed to register allowed root:", e));
+    } else {
+      setRegisteredCwd(null);
+    }
+  }, [selectedCwd, selectedCwdProp, onCwdChange]);
 
   // Auto-select cwd and restore session from URL on first load
   useEffect(() => {
@@ -335,7 +368,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         restoredRef.current = true;
         const target = allSessions.find((s) => s.id === initialSessionId);
         if (target) {
-          setSelectedCwd(target.cwd);
+          setSelectedCwd(getWorkspaceCwd(target.cwd));
           onSelectSession(target, true);
           return;
         }
@@ -394,9 +427,15 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, [selectedCwd, onNewSession]);
 
   const recentCwds = getRecentCwds(allSessions);
-  // Filter by selected cwd, but always include sessions with gemId (agent sessions)
   const filteredSessions = selectedCwd
-    ? allSessions.filter((s) => s.cwd === selectedCwd || !!s.gemId)
+    ? allSessions.filter((s) => {
+        if (!s.cwd) return false;
+        const sessionPath = s.cwd.replace(/\\/g, "/").toLowerCase();
+        const selectedPath = selectedCwd.replace(/\\/g, "/").toLowerCase();
+        if (sessionPath === selectedPath) return true;
+        const selectedPrefix = selectedPath.endsWith("/") ? selectedPath : `${selectedPath}/`;
+        return sessionPath.startsWith(selectedPrefix);
+      })
     : allSessions;
 
   // Build parent-child tree within the filtered set
@@ -831,7 +870,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                       </div>
                       
                       {/* Actions */}
-                      {gem.name !== "Gem-xY 文案助手" && (
+                      {gem.name !== "Gem-xY 文案助手" && gem.id !== "ppt-master-preset" && (
                         <div
                           className="gem-actions"
                           style={{
@@ -997,12 +1036,18 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           </div>
           {explorerOpen && (
             <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
-              <FileExplorer
-                cwd={selectedCwdProp ?? selectedCwd!}
-                onOpenFile={onOpenFile ?? (() => {})}
-                refreshKey={explorerKey}
-                onAtMention={onAtMention}
-              />
+              {registeredCwd && registeredCwd === (selectedCwdProp || selectedCwd) ? (
+                <FileExplorer
+                  cwd={getWorkspaceCwd(registeredCwd)}
+                  onOpenFile={onOpenFile ?? (() => {})}
+                  refreshKey={explorerKey}
+                  onAtMention={onAtMention}
+                />
+              ) : (
+                <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-dim)" }}>
+                  Verifying directory access...
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1139,7 +1184,9 @@ function SessionItem({
     }
   }, [lockedState, session, onRenamed]);
 
-  const title = session.name || session.firstMessage.slice(0, 50) || session.id.slice(0, 12);
+  const cleanName = session.name ? stripHiddenDirectives(session.name) : "";
+  const cleanFirstMsg = session.firstMessage ? stripHiddenDirectives(session.firstMessage) : "";
+  const title = cleanName || cleanFirstMsg.slice(0, 50) || session.id.slice(0, 12);
 
   const startRename = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();

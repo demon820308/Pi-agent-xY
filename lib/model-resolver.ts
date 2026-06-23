@@ -51,6 +51,7 @@ function getModelsEndpoint(provider: string, baseUrl: string): string {
   
   // Standard OpenAI-compatible format
   let url = baseUrl;
+  if (!url) return "";
   if (url.endsWith("/anthropic")) {
     url = url.replace("/anthropic", "/v1");
   }
@@ -63,91 +64,102 @@ function getModelsEndpoint(provider: string, baseUrl: string): string {
   return url;
 }
 
+export async function syncModelsInternal(registry: any, force = false) {
+  try {
+    const cache = loadCache();
+    const now = Date.now();
+    
+    const authPath = join(getAgentDir(), "auth.json");
+    if (!existsSync(authPath)) return;
+    const authData = JSON.parse(readFileSync(authPath, "utf8"));
+    const providers = Object.keys(authData);
+    
+    let cacheUpdated = false;
+    
+    for (const provider of providers) {
+      const apiKey = authData[provider]?.key;
+      if (!apiKey) continue;
+      
+      // Sync cache every 1 hour, unless forced
+      const existing = cache[provider];
+      if (!force && existing && (now - existing.updatedAt) < 60 * 60 * 1000) {
+        continue;
+      }
+      
+      const baseModel = (registry as any).models?.find((m: any) => m.provider === provider);
+      const rawBaseUrl = baseModel?.baseUrl || "";
+      
+      const endpoint = getModelsEndpoint(provider, rawBaseUrl);
+      if (!endpoint || (!endpoint.startsWith("http://") && !endpoint.startsWith("https://"))) {
+        continue;
+      }
+      
+      console.log(`[model-resolver] Syncing models list for provider: "${provider}" (force=${force})...`);
+      const headers: Record<string, string> = {};
+      
+      let url = endpoint;
+      const pid = provider.toLowerCase();
+      if (pid.includes("google") || pid.includes("gemini")) {
+        url = `${endpoint}?key=${apiKey}`;
+      } else {
+        headers["Authorization"] = `Bearer ${apiKey}`;
+      }
+      
+      try {
+        const res = await fetch(url, { headers, signal: AbortSignal.timeout(6000) });
+        if (!res.ok) {
+          console.error(`[model-resolver] Failed to fetch models for "${provider}": HTTP ${res.status}`);
+          continue;
+        }
+        const data = await res.json() as any;
+        let modelIds: string[] = [];
+        
+        if (pid.includes("google") || pid.includes("gemini")) {
+          const list = data.models || [];
+          modelIds = list.map((m: any) => {
+            const name = m.name || "";
+            return name.startsWith("models/") ? name.replace("models/", "") : name;
+          }).filter((id: string) => id.includes("gemini"));
+        } else {
+          const list = data.data || [];
+          modelIds = list.map((m: any) => m.id).filter(Boolean);
+        }
+        
+        if (modelIds.length > 0) {
+          const models = modelIds.map(id => {
+            const isVision = isVisionModel(provider, id);
+            return {
+              id,
+              name: id,
+              provider,
+              supportsVision: isVision
+            };
+          });
+          
+          cache[provider] = {
+            updatedAt: now,
+            models
+          };
+          cacheUpdated = true;
+          console.log(`[model-resolver] Successfully synced ${modelIds.length} models for "${provider}".`);
+        }
+      } catch (err) {
+        console.error(`[model-resolver] Fetch failed for "${provider}":`, err);
+      }
+    }
+    
+    if (cacheUpdated) {
+      saveCache(cache);
+    }
+  } catch (e) {
+    console.error("[model-resolver] Error in syncModelsInternal:", e);
+  }
+}
+
 export function triggerBackgroundModelsSync(registry: any) {
   setTimeout(async () => {
     try {
-      const cache = loadCache();
-      const now = Date.now();
-      
-      const authPath = join(getAgentDir(), "auth.json");
-      if (!existsSync(authPath)) return;
-      const authData = JSON.parse(readFileSync(authPath, "utf8"));
-      const providers = Object.keys(authData);
-      
-      let cacheUpdated = false;
-      
-      for (const provider of providers) {
-        const apiKey = authData[provider]?.key;
-        if (!apiKey) continue;
-        
-        // Sync cache every 1 hour
-        const existing = cache[provider];
-        if (existing && (now - existing.updatedAt) < 60 * 60 * 1000) {
-          continue;
-        }
-        
-        console.log(`[model-resolver] Background syncing models list for provider: "${provider}"...`);
-        
-        const baseModel = (registry as any).models?.find((m: any) => m.provider === provider);
-        const rawBaseUrl = baseModel?.baseUrl || "";
-        
-        const endpoint = getModelsEndpoint(provider, rawBaseUrl);
-        const headers: Record<string, string> = {};
-        
-        let url = endpoint;
-        const pid = provider.toLowerCase();
-        if (pid.includes("google") || pid.includes("gemini")) {
-          url = `${endpoint}?key=${apiKey}`;
-        } else {
-          headers["Authorization"] = `Bearer ${apiKey}`;
-        }
-        
-        try {
-          const res = await fetch(url, { headers, signal: AbortSignal.timeout(6000) });
-          if (!res.ok) {
-            console.error(`[model-resolver] Failed to fetch models for "${provider}": HTTP ${res.status}`);
-            continue;
-          }
-          const data = await res.json() as any;
-          let modelIds: string[] = [];
-          
-          if (pid.includes("google") || pid.includes("gemini")) {
-            const list = data.models || [];
-            modelIds = list.map((m: any) => {
-              const name = m.name || "";
-              return name.startsWith("models/") ? name.replace("models/", "") : name;
-            }).filter((id: string) => id.includes("gemini"));
-          } else {
-            const list = data.data || [];
-            modelIds = list.map((m: any) => m.id).filter(Boolean);
-          }
-          
-          if (modelIds.length > 0) {
-            const models = modelIds.map(id => {
-              const isVision = isVisionModel(provider, id);
-              return {
-                id,
-                name: id,
-                provider,
-                supportsVision: isVision
-              };
-            });
-            
-            cache[provider] = {
-              updatedAt: now,
-              models
-            };
-            cacheUpdated = true;
-            console.log(`[model-resolver] Successfully synced ${modelIds.length} models for "${provider}".`);
-          }
-        } catch (err) {
-          console.error(`[model-resolver] Fetch failed for "${provider}":`, err);
-        }
-      }
-      
-      if (cacheUpdated) {
-        saveCache(cache);
-      }
+      await syncModelsInternal(registry, false);
     } catch (e) {
       console.error("[model-resolver] Error in triggerBackgroundModelsSync:", e);
     }

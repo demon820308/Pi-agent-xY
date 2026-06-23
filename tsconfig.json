@@ -31,12 +31,25 @@
   },
   "include": [
     "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "components/**/*.ts",
+    "components/**/*.tsx",
+    "hooks/**/*.ts",
+    "hooks/**/*.tsx",
+    "lib/**/*.ts",
+    "lib/**/*.tsx",
+    "electron/**/*.js",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    ".next/cache",
+    "awesome-gpt-image-2-API-and-Prompts-main",
+    "open-design",
+    "ppt-master-main",
+    "skills-main",
+    "system_prompts_leaks"
   ]
 }

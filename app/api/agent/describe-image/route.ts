@@ -236,11 +236,24 @@ export async function POST(req: Request) {
 4. 画面背景 (background): 主体身后的远景、天际线、陪衬元素及空间的左右布局。
 5. 光照与色彩 (lighting): 光源方向（如逆光、侧光）、光效类型、色调基调与色彩氛围。
 6. 艺术风格 (style): 是什么画风或视觉流派（如：电影感写实摄影、新海诚动漫风、3D渲染、极简主义 UI、胶片摄影等），以及具体的镜头和构图方式（如中景、大光圈虚化、垂直构图）。
+7. 画面布局 (layout): 主体在画面中的位置（居中/三分法/偏左/偏右），前景-中景-远景的层次关系。
+8. 场景元素 (scene_elements): 画面中除主体外的关键陪衬物体、装饰、道具（如：散落的花瓣、漂浮的粒子、桌上的咖啡杯）。
+9. 文字处理 (text_treatment): 画面中是否有文字？如果有，描述文字的内容、字体风格（衬线/无衬线/手写体）、排版位置、颜色和大小。
+10. 情绪氛围 (mood): 画面传达的整体情绪（如：温暖治愈、神秘冷峻、活力四射、高级奢华）。
+11. 色彩调色板 (color_palette): 列出画面中的 3-5 个主要颜色及其 HEX 值。
+12. 画面比例 (aspect_ratio): 推测画面的宽高比（如：1:1, 4:3, 16:9, 9:16）。
 
 ---
 
 ## 🛠️ 【最终直调用 Prompt】
-请根据上述分析，直接组合出可直接复制的流利中文 Prompt。请使用纯英文自然语言或短语（用逗号隔开），以便我直接复制粘贴：`;
+请根据上述分析，直接组合出可直接复制的、符合 DALL-E 3 / GPT-Image-2 最佳实践的英文 Prompt。
+要求：
+- 使用纯英文自然语言或短语，用逗号隔开
+- 将最重要的视觉元素放在前面
+- 包含具体的光照、材质、构图描述
+- 如果是商业海报/UI截图/电商主图等，请包含文字排版指令和画面比例
+- 末尾附加推荐的 --ar 参数（如 --ar 1:1, --ar 9:16）
+请直接给出 Prompt：`;
 
     // 5. Make API Call based on resolved provider
     if (useGoogleApi) {
@@ -262,7 +275,7 @@ export async function POST(req: Request) {
             },
           ],
           generationConfig: {
-            maxOutputTokens: 1000,
+            maxOutputTokens: 2000,
           },
         }),
       });
@@ -321,7 +334,7 @@ export async function POST(req: Request) {
 
       const requestBody = {
         model: modelId || "claude-3-5-sonnet-20241022",
-        max_tokens: 1000,
+        max_tokens: 2000,
         messages: [
           {
             role: "user",
@@ -388,7 +401,7 @@ export async function POST(req: Request) {
             ],
           },
         ],
-        max_tokens: 1000,
+        max_tokens: 2000,
       };
       console.log(`[describe-image] Sending to: ${endpoint}`);
       console.log(`[describe-image] model: ${modelId}, provider: ${provider}`);

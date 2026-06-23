@@ -159,6 +159,12 @@ export interface GemInfoEntry extends SessionEntryBase {
   gemAvatar: string;
 }
 
+export interface DesignInfoEntry extends SessionEntryBase {
+  type: "design_info";
+  designSystemId: string;
+  designSystemName: string;
+}
+
 export type SessionEntry =
   | SessionMessageEntry
   | ThinkingLevelChangeEntry
@@ -169,7 +175,8 @@ export type SessionEntry =
   | CustomMessageEntry
   | LabelEntry
   | SessionInfoEntry
-  | GemInfoEntry;
+  | GemInfoEntry
+  | DesignInfoEntry;
 
 export type FileEntry = SessionHeader | SessionEntry;
 
@@ -193,6 +200,8 @@ export interface SessionInfo {
   gemId?: string; // Gem-xY agent id if this session uses a custom agent
   gemName?: string; // Gem display name
   gemAvatar?: string; // Gem emoji avatar
+  designSystemId?: string; // Design system id if this session uses a design system
+  designSystemName?: string; // Design system display name
 }
 
 export interface SessionContext {

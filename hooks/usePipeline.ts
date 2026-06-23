@@ -5,7 +5,7 @@
 'use client'
 
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { extractAudioFromVideo, isVideoFile } from '@/lib/video-audio-extractor'
+import { isVideoFile } from '@/lib/video-file'
 import { buildRewriteMessage } from '@/lib/pipeline-gem'
 import { saveCachedAudio } from './useTts'
 
@@ -149,6 +149,7 @@ export function usePipeline(deps: UsePipelineDeps) {
       throw new Error(`Not a video file: ${file.name}`)
     }
 
+    const { extractAudioFromVideo } = await import('@/lib/video-audio-extractor')
     const { data: audioData } = await extractAudioFromVideo(file, {
       format: 'wav',
       sampleRate: 16000,
@@ -160,7 +161,8 @@ export function usePipeline(deps: UsePipelineDeps) {
 
     setState((s) => ({ ...s, progress: 0.40, statusText: 'Transcribing with Whisper...' }))
 
-    const text = await transcribeAudio(audioData, (p) => {
+    const { transcribeWithWhisper } = await import('@/lib/whisper-transcribe')
+    const text = await transcribeWithWhisper(audioData, 'zh-CN', (p) => {
       setState((s) => ({ ...s, progress: 0.40 + p * 0.30 }))
     })
 
@@ -543,7 +545,8 @@ async function getWhisperPipeline() {
 
   whisperLoadPromise = (async () => {
     try {
-      const { pipeline } = await import('@huggingface/transformers')
+      const importModule = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<any>
+      const { pipeline } = await importModule('@huggingface/transformers')
       let pipe
       try {
         pipe = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small', { device: 'webgpu' })

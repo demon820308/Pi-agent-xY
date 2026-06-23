@@ -1,8 +1,14 @@
 import type { NextConfig } from "next";
+import pkg from "./package.json";
+import piPkg from "./node_modules/@earendil-works/pi-coding-agent/package.json";
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["@earendil-works/pi-coding-agent", "@earendil-works/pi-ai"],
   allowedDevOrigins: ['192.168.*.*'],
+  env: {
+    NEXT_PUBLIC_APP_VERSION: pkg.version,
+    NEXT_PUBLIC_PI_VERSION: piPkg.version,
+  },
   async headers() {
     return [
       {
@@ -20,3 +26,4 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
+
