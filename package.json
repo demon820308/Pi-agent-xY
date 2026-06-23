@@ -1,6 +1,6 @@
 {
   "name": "@zwbigi/pi-agent-xy",
-  "version": "0.6.35",
+  "version": "0.6.37",
   "author": "demon820308",
   "description": "Pi Agent xY - Web UI for the pi coding agent",
   "main": "electron/main.js",
