@@ -77,7 +77,9 @@
     "productName": "Pi Agent xY Desktop",
     "asar": true,
     "asarUnpack": [
-      "**/node_modules/ffmpeg-static/**/*"
+      "**/node_modules/ffmpeg-static/**/*",
+      "**/node_modules/next/**/*",
+      "**/.next/**/*"
     ],
     "directories": {
       "output": "dist"

@@ -2,10 +2,36 @@ const { app, BrowserWindow, utilityProcess } = require("electron");
 const { execSync } = require("child_process");
 const path = require("path");
 const http = require("http");
+const fs = require("fs");
+const os = require("os");
 
 let mainWindow;
 let nextProcess;
 const PORT = 3030;
+
+const logDir = path.join(os.homedir(), ".pi", "agent");
+try {
+  if (!fs.existsSync(logDir)) {
+    fs.mkdirSync(logDir, { recursive: true });
+  }
+} catch (e) {
+  // ignore
+}
+const logFile = path.join(logDir, "server.log");
+const logStream = fs.createWriteStream(logFile, { flags: "a" });
+
+function log(msg) {
+  const time = new Date().toISOString();
+  try {
+    logStream.write(`[${time}] ${msg}\n`);
+  } catch (e) {
+    // ignore
+  }
+}
+
+process.on("uncaughtException", (err) => {
+  log(`[Uncaught Exception in Main Process]: ${err.stack || err}`);
+});
 
 function getShellEnv() {
   if (process.platform === "win32") {
@@ -31,18 +57,32 @@ function startNextServer() {
       const serverPath = path.join(__dirname, "server-worker.js");
       const env = getShellEnv();
       
+      log(`Starting Next.js Server Worker from path: ${serverPath}`);
+      
       // Fork Next.js server as a separate utility process (Electron Helper)
       nextProcess = utilityProcess.fork(serverPath, [], {
         cwd: path.join(__dirname, ".."),
         env: { ...env, PORT, NODE_ENV: "production" },
-        stdio: "inherit"
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      
+      nextProcess.stdout.on("data", (chunk) => {
+        try {
+          logStream.write(chunk);
+        } catch (e) {}
+      });
+      
+      nextProcess.stderr.on("data", (chunk) => {
+        try {
+          logStream.write(chunk);
+        } catch (e) {}
       });
       
       nextProcess.on("exit", (code) => {
-        console.log(`[Next.js Server Worker] exited with code ${code}`);
+        log(`[Next.js Server Worker] exited with code ${code}`);
       });
     } catch (e) {
-      console.error("[Next.js Spawn Error]:", e);
+      log(`[Next.js Spawn Error]: ${e.stack || e}`);
     }
   }
 }
