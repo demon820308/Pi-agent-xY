@@ -1,5 +1,5 @@
-const { app, BrowserWindow } = require("electron");
-const { fork, execSync } = require("child_process");
+const { app, BrowserWindow, utilityProcess } = require("electron");
+const { execSync } = require("child_process");
 const path = require("path");
 const http = require("http");
 
@@ -31,8 +31,8 @@ function startNextServer() {
       const serverPath = path.join(__dirname, "server-worker.js");
       const env = getShellEnv();
       
-      // Fork Next.js server as a separate child process (Electron Helper)
-      nextProcess = fork(serverPath, [], {
+      // Fork Next.js server as a separate utility process (Electron Helper)
+      nextProcess = utilityProcess.fork(serverPath, [], {
         cwd: path.join(__dirname, ".."),
         env: { ...env, PORT, NODE_ENV: "production" },
         stdio: "inherit"
