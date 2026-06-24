@@ -59,10 +59,20 @@ function startNextServer() {
       
       log(`Starting Next.js Server Worker from path: ${serverPath}`);
       
+      // Sanitise environment variables to ensure all values are strings
+      const cleanEnv = {};
+      for (const [key, value] of Object.entries(env)) {
+        if (value !== undefined && value !== null) {
+          cleanEnv[key] = String(value);
+        }
+      }
+      cleanEnv.PORT = String(PORT);
+      cleanEnv.NODE_ENV = "production";
+
       // Fork Next.js server as a separate utility process (Electron Helper)
       nextProcess = utilityProcess.fork(serverPath, [], {
         cwd: path.join(__dirname, ".."),
-        env: { ...env, PORT, NODE_ENV: "production" },
+        env: cleanEnv,
         stdio: ["ignore", "pipe", "pipe"]
       });
       
