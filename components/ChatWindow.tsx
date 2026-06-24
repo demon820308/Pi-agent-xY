@@ -690,8 +690,9 @@ export function ChatWindow({
     if (matchedBrandId) {
       try {
         const dsRes = await fetch('/api/design-systems');
-        const dsList = await dsRes.json();
-        const found = Array.isArray(dsList) ? dsList.find((d: any) => d.id === matchedBrandId) : null;
+        const data = await dsRes.json();
+        const dsList = Array.isArray(data) ? data : (data && Array.isArray(data.systems) ? data.systems : []);
+        const found = dsList.find((d: any) => d.id === matchedBrandId);
         if (found) matchedBrandName = found.name;
       } catch {}
     }
@@ -720,7 +721,24 @@ export function ChatWindow({
 
     const premiumDesignGuide = `\n\n## 界面美化设计规范（必须严格遵守）\n1. **高端视觉设计**：严禁使用原生或刺眼的纯红、纯绿、纯蓝。优先选用深浅渐变、微渐变、和品牌调性相符的 HSL 柔和配色。\n2. **现代排版与字体**：引入并应用现代字体（如 \`Inter\`、\`Outfit\` 等 Google Fonts），建立合理视觉层次。\n3. **细节与动态美感**：按钮、卡片和导航链接添加精美的 hover 悬停效果与平滑的过渡动画。使用圆角和细腻的阴影来丰富层级。`;
 
-    const prompt = `我需要你根据参考信息，完整复刻一个网页。\n\n## 用户需求\n${params.prompt}\n${designTokenSection}\n${codeSection}${premiumDesignGuide}\n\n## 执行要求\n1. **分析参考截图**：仔细查看附带的截图，理解页面的整体布局结构、视觉层级、配色方案、字体排版、间距关系、交互元素\n2. **像素级还原**：尽可能精确地复刻截图中的布局和视觉效果\n3. **生成 HTML 页面**：创建一个单文件 HTML 页面（例如 \`${tmp}/replica.html\`），使用 Tailwind CSS（通过 CDN 引入），使用现代 CSS 特性，确保响应式设计\n4. **生成设计思路文档**：创建一个 Markdown 文件（例如 \`${tmp}/replica-design.md\`），内容包括：原始设计分析、布局结构决策、设计 Token 应用说明、组件拆分建议、响应式适配策略、后续可优化方向\n5. **确保可运行**：生成的 HTML 必须能直接在浏览器中打开，无错误\n\n请逐步思考并执行。`;
+    const designMdFormat = `\n\`\`\`yaml\n---\ncolors:\n  primary: "#hex"\n  on-primary: "#hex"\n  ink: "#hex"\n  canvas: "#hex"\n  surface-1: "#hex"\n  ...\ntypography:\n  display-xl:\n    fontFamily: ...\n    fontSize: ...\n    fontWeight: ...\n    ...\n  body:\n    ...\nrounded:\n  xs: Npx / sm: Npx / md: Npx / lg: Npx ...\nspacing:\n  xs: Npx / sm: Npx / md: Npx / lg: Npx ...\ncomponents:\n  button-primary:\n    backgroundColor / textColor / rounded / padding ...\n---\n## Overview\n（整体设计语言描述）\n\`\`\``;
+
+    const hasScreenshot = !!params.screenshot;
+    const hasUrl = !!params.url;
+
+    const referenceAnalysisStep = hasScreenshot
+      ? `\n## 第一步：参考截图分析（必须先完成）\n1. **仔细分析**附带的参考截图（images[0]），逐项识别并列出截图中所有可见内容（标题、正文、按钮文案、导航项、表单标签、页脚信息等）。\n2. **提取设计风格**：分析截图中的配色方案（主色、背景色、文字色的 Hex 值）、字体风格（字族、字重、字号范围）、间距规律（段间距、卡片间距）、圆角大小、阴影效果、hover 过渡风格。\n3. **生成还原 HTML**：根据分析结果，创建一个尽可能忠实还原截图内容和布局的单文件 HTML 页面（保存为 \`${tmp}/reference-restored.html\`），使用 Tailwind CSS（CDN 引入）。${hasUrl ? '同时参考抓取到的网页内容来补全截图中不清晰的细节。' : ''}\n4. **生成设计规范文件**：创建一个 DESIGN.md 文件（保存为 \`${tmp}/reference-design.md\`），格式如下：${designMdFormat}\n5. **完成后再执行第二步**。\n\n## 第二步：复刻生成\n以 reference-restored.html 的内容和 reference-design.md 的设计规范为基础，进行最终复刻。`
+      : hasUrl
+      ? `\n## 第一步：参考网页分析（必须先完成）\n1. **获取网页内容**：使用网页抓取/读取工具（例如 read_url_content）获取 ${params.url} 的完整 HTML 结构和文本内容。\n2. **逐项列出内容**：从获取到的网页中，识别并列出所有可见内容（标题、正文、按钮文案、导航项、表单标签、页脚信息等）。\n3. **提取设计风格**：分析网页的配色方案（主色、背景色、文字色的 Hex 值）、字体风格（字族、字重、字号范围）、间距规律（段间距、卡片间距）、圆角大小、阴影效果。\n4. **生成还原 HTML**：根据分析结果，创建一个尽可能忠实还原网页内容和布局的单文件 HTML 页面（保存为 \`${tmp}/reference-restored.html\`），使用 Tailwind CSS（CDN 引入）。去除广告、脚本等无关内容，只保留核心页面结构。\n5. **生成设计规范文件**：创建一个 DESIGN.md 文件（保存为 \`${tmp}/reference-design.md\`），格式如下：${designMdFormat}\n6. **完成后再执行第二步**。\n\n## 第二步：复刻生成\n以 reference-restored.html 的内容和 reference-design.md 的设计规范为基础，进行最终复刻。`
+      : '';
+
+    const finalSteps = (hasScreenshot || hasUrl)
+      ? `\n## 最终产物\n1. **生成 HTML 页面**：创建一个单文件 HTML 页面（例如 \`${tmp}/replica.html\`），使用 Tailwind CSS（通过 CDN 引入），使用现代 CSS 特性，确保响应式设计。\n2. **生成设计思路文档**：创建一个 Markdown 文件（例如 \`${tmp}/replica-design.md\`），内容包括：原始设计分析、布局结构决策、设计 Token 应用说明、组件拆分建议、响应式适配策略、后续可优化方向。\n3. **确保可运行**：生成的 HTML 必须能直接在浏览器中打开，无错误。\n\n请逐步思考并执行。`
+      : `\n## 执行要求\n1. **遵循设计规范**：仔细分析并理解所提供设计系统的配色 Hex 值、字体、圆角、阴影等 Token 信息，并在生成网页时严格遵守。\n2. **从零设计与排版**：根据用户需求描述，合理规划页面布局结构、视觉层级和内容展示，使其具有高水平的专业设计感。\n3. **生成 HTML 页面**：创建一个单文件 HTML 页面（例如 \`${tmp}/replica.html\`），使用 Tailwind CSS（通过 CDN 引入），使用现代 CSS 特性，确保响应式设计。\n4. **生成设计思路文档**：创建一个 Markdown 文件（例如 \`${tmp}/replica-design.md\`），内容包括：页面设计思路、布局结构决策、设计 Token 应用说明、组件拆分建议、响应式适配策略、后续可优化方向。\n5. **确保可运行**：生成的 HTML 必须能直接在浏览器中打开，无错误。\n\n请逐步思考并执行。`;
+
+    const prompt = (!hasScreenshot && !hasUrl)
+      ? `我需要你根据以下需求，从零设计并生成一个全新的网页，并严格遵循指定的设计规范模板。\n\n## 用户需求\n${params.prompt}\n${designTokenSection}\n${codeSection}${premiumDesignGuide}\n\n${finalSteps}`
+      : `我需要你根据参考信息，完整复刻一个网页。\n\n## 用户需求\n${params.prompt}\n${designTokenSection}\n${codeSection}${premiumDesignGuide}${referenceAnalysisStep}${finalSteps}`;
 
     const imagesPayload: { type: "image"; data: string; mimeType: string }[] = [];
     if (params.screenshot) {
@@ -741,7 +759,7 @@ export function ChatWindow({
           message: prompt,
           toolNames: PRESET_DEFAULT,
           images: imagesPayload.length > 0 ? imagesPayload : undefined,
-          url: params.url && !params.screenshot ? params.url : undefined,
+          url: params.url || undefined,
           designSystem: matchedBrandId,
           ...(displayModelValue ? { provider: displayModelValue.provider, modelId: displayModelValue.modelId } : {}),
         }),
@@ -757,10 +775,196 @@ export function ChatWindow({
         created: new Date().toISOString(),
         modified: new Date().toISOString(),
         messageCount: 1,
-        firstMessage: `整体复刻网页`,
+        firstMessage: params.url
+          ? `整体复刻网页: ${params.url}`
+          : (matchedBrandId
+              ? `按规范设计网页: ${matchedBrandName}`
+              : `整体复刻网页`),
       });
     } catch (err) {
       console.error("Failed to generate replica:", err);
+      alert("创建新会话失败，请重试：" + String(err));
+    }
+  }, [session, newSessionCwd, displayModelValue, onSessionCreated, onDesignToolsDeactivate]);
+
+  const handleGenerateStyleTransfer = useCallback(async (params: {
+    sourceScreenshot?: string;
+    sourceHtml?: string;
+    sourceFilePath?: string;
+    refScreenshot?: string;
+    refUrl?: string;
+    refDesignSystemId?: string;
+    prompt: string;
+    targetPath?: string;
+  }) => {
+    onDesignToolsDeactivate?.();
+
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const tmp = params.targetPath || `Temp/New_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+
+    const matchedBrandId = params.refDesignSystemId || null;
+    let matchedBrandName = '';
+    let designTokenSection = '';
+
+    if (matchedBrandId) {
+      try {
+        const dsRes = await fetch('/api/design-systems');
+        const data = await dsRes.json();
+        const dsList = Array.isArray(data) ? data : (data && Array.isArray(data.systems) ? data.systems : []);
+        const found = dsList.find((d: any) => d.id === matchedBrandId);
+        if (found) matchedBrandName = found.name;
+      } catch {}
+
+      try {
+        const dsContentRes = await fetch(`/api/design-systems?id=${encodeURIComponent(matchedBrandId)}`);
+        if (dsContentRes.ok) {
+          const dsData = await dsContentRes.json();
+          if (dsData.content) {
+            const truncated = dsData.content.length > 12000 ? dsData.content.slice(0, 12000) + '\n...(已截断)' : dsData.content;
+            designTokenSection = `\n## 目标风格设计系统「${matchedBrandName}」\n以下是完整的设计规范 Token，你必须严格遵循其中的配色 Hex 值、字体族、圆角大小等视觉风格：\n\n\`\`\`markdown\n${truncated}\n\`\`\``;
+          }
+        }
+      } catch {}
+      if (!designTokenSection) {
+        designTokenSection = `\n## 目标风格设计系统\n本项目已锁定「${matchedBrandName}」设计系统作为风格参考。`;
+      }
+    }
+
+    let sourceSection = '';
+    if (params.sourceHtml) {
+      const truncated = params.sourceHtml.length > 15000 ? params.sourceHtml.slice(0, 15000) + '\n...(已截断)' : params.sourceHtml;
+      sourceSection = `\n## 源页面 HTML 代码\n以下是源页面的完整 HTML 代码，你必须 100% 保留其中的所有文字内容、标题层级、表单元素、列表项、链接、按钮文字和整体结构：\n\n\`\`\`html\n${truncated}\n\`\`\``;
+    }
+
+    const imageLabels: string[] = [];
+    if (params.sourceScreenshot) imageLabels.push('images[0] 为源页面截图（Source）');
+    if (params.refScreenshot) imageLabels.push(params.sourceScreenshot ? 'images[1] 为目标风格参考截图（Target Style）' : 'images[0] 为目标风格参考截图（Target Style）');
+
+    const imageNote = imageLabels.length > 0
+      ? `\n\n## 图片参考说明\n${imageLabels.join('；')}。请仔细分析图片中的视觉信息。`
+      : '';
+
+    const hasSourceScreenshot = !!params.sourceScreenshot;
+    const hasSourceHtml = !!params.sourceHtml;
+    const hasRefScreenshot = !!params.refScreenshot;
+    const hasRefUrl = !!params.refUrl;
+
+    const designMdFormat = `\n\`\`\`yaml\n---\ncolors:\n  primary: "#hex"\n  on-primary: "#hex"\n  ink: "#hex"\n  canvas: "#hex"\n  surface-1: "#hex"\n  ...\ntypography:\n  display-xl:\n    fontFamily: ...\n    fontSize: ...\n    fontWeight: ...\n    ...\n  body:\n    ...\nrounded:\n  xs: Npx / sm: Npx / md: Npx / lg: Npx ...\nspacing:\n  xs: Npx / sm: Npx / md: Npx / lg: Npx ...\ncomponents:\n  button-primary:\n    backgroundColor / textColor / rounded / padding ...\n---\n## Overview\n（整体设计语言描述）\n\`\`\``;
+
+    const refAnalysisStep = hasRefScreenshot
+      ? `${hasSourceScreenshot && !hasSourceHtml ? '' : '## 第一步：'}参考截图风格分析（必须先完成）
+1. **仔细分析** images[${hasSourceScreenshot ? 1 : 0}]（风格参考截图），提取完整的设计风格信息：
+   - **配色方案**：主色、背景色、文字色、强调色的 Hex 值
+   - **字体风格**：字族、字重、字号范围、行高、字间距
+   - **间距规律**：段间距、卡片间距、内容区与边缘的留白
+   - **圆角与阴影**：按钮/卡片的圆角大小、阴影参数
+   - **组件风格**：按钮样式、卡片样式、导航栏样式、表单样式
+2. **生成还原 HTML**：创建一个尽可能忠实还原参考截图布局和视觉效果的单文件 HTML 页面（保存为 \`${tmp}/reference-restored.html\`），使用 Tailwind CSS（CDN 引入）。${hasRefUrl ? '同时参考抓取到的网页内容来补全截图中不清晰的细节。' : ''}
+3. **生成设计规范文件**：创建一个 DESIGN.md 文件（保存为 \`${tmp}/reference-design.md\`），严格按以下格式输出：${designMdFormat}
+4. **完成后再执行下一步**。`
+      : hasRefUrl
+      ? `${hasSourceScreenshot && !hasSourceHtml ? '' : '## 第一步：'}参考网页风格分析（必须先完成）
+1. **获取网页内容**：使用网页抓取/读取工具（例如 read_url_content）获取 ${params.refUrl} 的完整 HTML 结构和内容。
+2. **提取设计风格**：分析网页的配色方案（主色、背景色、文字色的 Hex 值）、字体风格（字族、字重、字号范围）、间距规律、圆角大小、阴影效果。
+3. **生成还原 HTML**：根据分析结果，创建一个尽可能忠实还原网页视觉效果的单文件 HTML 页面（保存为 \`${tmp}/reference-restored.html\`），使用 Tailwind CSS（CDN 引入）。去除广告、脚本等无关内容，只保留核心页面结构。
+4. **生成设计规范文件**：创建一个 DESIGN.md 文件（保存为 \`${tmp}/reference-design.md\`），严格按以下格式输出：${designMdFormat}
+5. **完成后再执行下一步**。`
+      : '';
+
+    const stepHeader = hasSourceScreenshot && !hasSourceHtml ? '第三步' : (hasRefScreenshot || hasRefUrl) ? '第二步' : '执行要求';
+
+    const prompt = `我需要你进行风格复刻（Style Transfer）：将源页面的全部内容与结构，迁移为指定目标风格的视觉设计。
+
+## 任务核心原则
+- **内容零丢失**：源页面中的每一个文字、标题、段落、按钮、表单、列表、链接、图标描述都必须完整保留，不允许遗漏或改写任何内容。
+- **结构不变**：源页面的 HTML 结构层级（header、section、grid 布局等）必须保持不变。
+- **仅替换视觉风格**：只替换配色方案、字体族、字号、字重、间距、圆角、阴影、hover 效果、渐变等视觉样式。
+
+${sourceSection}${designTokenSection}${imageNote}
+
+## 用户补充需求
+${params.prompt}
+
+${hasSourceScreenshot && !hasSourceHtml ? `## 第一步：源截图内容还原（必须先完成）
+1. **仔细分析** images[0]（源页面截图），逐项识别并列出截图中所有可见内容，包括但不限于：
+   - 页面标题、副标题、导航栏文字
+   - 所有段落正文、列表项、表格内容
+   - 按钮文案、表单标签、输入框占位符
+   - 页脚信息、版权声明、链接文字
+   - 图标旁的说明文字、徽章/标签文字
+2. **识别布局结构**：分析截图中的布局方式（几栏、卡片网格、左右分栏等）、各区块的层级关系。
+3. **生成还原 HTML**：根据以上分析，创建一个尽可能忠实还原源截图内容和布局的单文件 HTML 页面（例如 \`${tmp}/source-restored.html\`），使用 Tailwind CSS（CDN 引入），白色背景，纯内容还原不需要任何美化。确保此文件中的每一项文字内容都与源截图完全一致。
+4. **完成后再执行下一步**。` : ''}${refAnalysisStep ? `
+${refAnalysisStep}` : ''}
+
+## ${stepHeader}：风格迁移
+
+${hasSourceHtml ? `## 分析源页面
+仔细阅读上方提供的源页面 HTML 代码，确认所有文字内容、结构层级和交互元素。
+
+` : ''}${hasRefScreenshot || hasRefUrl ? `## 应用设计规范
+严格遵循 reference-design.md 中提取的设计 Token（配色、字体、圆角、间距），将源页面的视觉样式替换为目标风格。
+
+` : designTokenSection ? `## 遵循设计规范
+仔细阅读上方提供的设计系统规范 Token，严格遵循其中的配色 Hex 值、字体族、圆角大小等设计风格。
+
+` : `## 分析目标风格
+仔细查看目标风格参考截图，提取配色方案、字体排版、间距规律、圆角阴影等视觉特征。
+
+`}
+## 生成最终产物
+1. **生成最终 HTML 页面**：创建一个单文件 HTML 页面（例如 \`${tmp}/style-transfer.html\`），使用 Tailwind CSS（通过 CDN 引入），确保响应式设计，确保所有样式内联或在 \`<style>\` 标签中。
+2. **生成迁移说明文档**：创建一个 Markdown 文件（例如 \`${tmp}/style-transfer-spec.md\`），内容包括：源页面内容清单、目标风格提取结果、配色迁移映射表、字体替换方案、间距调整方案。
+3. **确保可运行**：生成的 HTML 必须能直接在浏览器中打开，无错误。
+
+请逐步思考并执行。`;
+
+    const imagesPayload: { type: "image"; data: string; mimeType: string }[] = [];
+    if (params.sourceScreenshot) {
+      const rawBase64 = params.sourceScreenshot.replace(/^data:image\/\w+;base64,/, '');
+      imagesPayload.push({ type: "image", data: rawBase64, mimeType: "image/png" });
+    }
+    if (params.refScreenshot) {
+      const rawBase64 = params.refScreenshot.replace(/^data:image\/\w+;base64,/, '');
+      imagesPayload.push({ type: "image", data: rawBase64, mimeType: "image/png" });
+    }
+
+    try {
+      const activeCwd = session?.cwd || newSessionCwd || process.cwd();
+      const { PRESET_DEFAULT } = await import("@/components/ToolPanel");
+
+      const res = await fetch("/api/agent/new", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cwd: activeCwd,
+          type: "prompt",
+          message: prompt,
+          toolNames: PRESET_DEFAULT,
+          images: imagesPayload.length > 0 ? imagesPayload : undefined,
+          url: params.refUrl && !params.refScreenshot ? params.refUrl : undefined,
+          designSystem: matchedBrandId || undefined,
+          ...(displayModelValue ? { provider: displayModelValue.provider, modelId: displayModelValue.modelId } : {}),
+        }),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      onSessionCreated?.({
+        id: data.sessionId,
+        path: "",
+        cwd: activeCwd,
+        name: undefined,
+        created: new Date().toISOString(),
+        modified: new Date().toISOString(),
+        messageCount: 1,
+        firstMessage: matchedBrandName
+          ? `风格复刻 → ${matchedBrandName}`
+          : (params.refUrl ? `风格复刻: ${params.refUrl}` : '风格复刻'),
+      });
+    } catch (err) {
+      console.error("Failed to generate style transfer:", err);
       alert("创建新会话失败，请重试：" + String(err));
     }
   }, [session, newSessionCwd, displayModelValue, onSessionCreated, onDesignToolsDeactivate]);
@@ -775,12 +979,12 @@ export function ChatWindow({
     const pad = (n: number) => String(n).padStart(2, '0');
     const tmp = `Temp/New_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 
-    const prompt = `我需要你对一个网页/截图进行 5 维度设计评审。
+    const prompt = `我需要你对一个网页/截图进行 5 维度设计评审。${params.url ? `\n\n待评审的网页 URL 为：${params.url}\n请使用你的网页抓取/读取工具（例如 read_url_content）先获取该网页的内容，然后再进行评审。` : ""}
 
 ## 评审维度
 请从以下 5 个维度进行专业评审，每个维度给出 0-10 分的评分：
 
-1. **哲学一致性** (Philosophy Consistency) — 设计是否传达了清晰的品牌理念和设计哲学？各元素之间是否有统一的设计语言？
+1. **哲学一致性** (Philosophy Consistency) — 设计是否传达了清晰的品牌理念 and 设计哲学？各元素之间是否有统一的设计语言？
 2. **视觉层级** (Visual Hierarchy) — 信息的重要程度是否通过大小、颜色、间距等视觉手段清晰表达？用户能否快速找到核心内容？
 3. **细节执行** (Detail Execution) — 像素级对齐、间距一致性、字体渲染、颜色搭配、圆角使用等细节是否精致？
 4. **功能性** (Functionality) — 布局是否合理？交互元素是否易于识别和操作？是否符合用户直觉？
@@ -830,13 +1034,18 @@ export function ChatWindow({
         created: new Date().toISOString(),
         modified: new Date().toISOString(),
         messageCount: 1,
-        firstMessage: `5维度设计评审`,
+        firstMessage: params.url ? `5维度设计评审: ${params.url}` : `5维度设计评审`,
       });
     } catch (err) {
       console.error("Failed to generate critique:", err);
       alert("创建新会话失败，请重试：" + String(err));
     }
   }, [session, newSessionCwd, displayModelValue, onSessionCreated, onDesignToolsDeactivate]);
+
+  const handleGeneratePPT = useCallback((prompt: string) => {
+    onDesignToolsDeactivate?.();
+    handleSend(prompt);
+  }, [handleSend, onDesignToolsDeactivate]);
 
   // Push session stats up to AppShell for the top bar.
   // Compare scalar fields to avoid loops from new object identity each render.
@@ -925,9 +1134,6 @@ export function ChatWindow({
       onSoundToggle={onSoundToggle}
       cwd={session?.cwd ?? newSessionCwd ?? null}
       onOpenCookieConfig={() => setCookieModalOpen(true)}
-      designSystem={designSystem}
-      onDesignSystemChange={onDesignSystemChange}
-      designSystemList={designSystemList}
       onOpenDeepResearch={onOpenDeepResearch}
       isNew={isNew}
     />
@@ -984,7 +1190,9 @@ export function ChatWindow({
               onClose={() => onDesignToolsDeactivate?.()}
               onGenerateManualFix={handleGenerateManualFix}
               onGenerateReplica={handleGenerateReplica}
+              onGenerateStyleTransfer={handleGenerateStyleTransfer}
               onGenerateCritique={handleGenerateCritique}
+              onGeneratePPT={handleGeneratePPT}
               modelList={modelList}
               currentModelKey={displayModelValue ? `${displayModelValue.provider}/${displayModelValue.modelId}` : undefined}
               onModelChange={handleModelChange}
@@ -1335,7 +1543,9 @@ export function ChatWindow({
             onClose={() => onDesignToolsDeactivate?.()}
             onGenerateManualFix={handleGenerateManualFix}
             onGenerateReplica={handleGenerateReplica}
+            onGenerateStyleTransfer={handleGenerateStyleTransfer}
             onGenerateCritique={handleGenerateCritique}
+            onGeneratePPT={handleGeneratePPT}
             modelList={modelList}
             currentModelKey={displayModelValue ? `${displayModelValue.provider}/${displayModelValue.modelId}` : undefined}
             onModelChange={handleModelChange}

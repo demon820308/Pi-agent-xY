@@ -81,9 +81,6 @@ interface Props {
   onSoundToggle?: () => void;
   cwd?: string | null;
   onOpenCookieConfig?: () => void;
-  designSystem?: string | null;
-  onDesignSystemChange?: (id: string | null) => void;
-  designSystemList?: { id: string; name: string; category: string }[];
 
   isNew?: boolean;
   sessionId?: string | null;
@@ -288,9 +285,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   soundEnabled, onSoundToggle,
   cwd,
   onOpenCookieConfig,
-  designSystem,
-  onDesignSystemChange,
-  designSystemList,
   onOpenDeepResearch,
   isNew,
   sessionId,
@@ -300,9 +294,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [toolDropdownOpen, setToolDropdownOpen] = useState(false);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
-  const [designDropdownOpen, setDesignDropdownOpen] = useState(false);
-  const [designDropdownRect, setDesignDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
-  const [previewDsId, setPreviewDsId] = useState<string | null>(null);
   const [videoUploadDropdownOpen, setVideoUploadDropdownOpen] = useState(false);
   const [videoLinkUrl, setVideoLinkUrl] = useState("");
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
@@ -469,14 +460,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     return () => controller.abort();
   }, []);
 
-  const [pptPanelOpen, setPptPanelOpen] = useState(false);
-  const [pptTheme, setPptTheme] = useState('tokyo-night');
-  const [pptTemplate, setPptTemplate] = useState('tech-sharing');
-  const [pptSlides, setPptSlides] = useState(10);
-  const [pptAudience, setPptAudience] = useState('');
-  const [pptTopic, setPptTopic] = useState('');
-  const pptPanelRef = useRef<HTMLDivElement>(null);
-
   const isTts = model ? isTtsModel(model.provider, model.modelId) : false;
 
   // Model-Adaptive Voice Workspace States
@@ -616,7 +599,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const modelDropdownPanelRef = useRef<HTMLDivElement>(null);
   const toolDropdownRef = useRef<HTMLDivElement>(null);
   const thinkingDropdownRef = useRef<HTMLDivElement>(null);
-  const designDropdownRef = useRef<HTMLDivElement>(null);
   const videoUploadDropdownRef = useRef<HTMLDivElement>(null);
   const geminiMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1052,18 +1034,12 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
       if (thinkingDropdownRef.current && !thinkingDropdownRef.current.contains(e.target as Node)) {
         setThinkingDropdownOpen(false);
       }
-      if (designDropdownRef.current && !designDropdownRef.current.contains(e.target as Node)) {
-        setDesignDropdownOpen(false);
-      }
       if (videoUploadDropdownRef.current && !videoUploadDropdownRef.current.contains(e.target as Node)) {
         setVideoUploadDropdownOpen(false);
       }
       if (geminiMenuRef.current && !geminiMenuRef.current.contains(e.target as Node)) {
         setGeminiMenuOpen(false);
         setGeminiSubMenu('none');
-      }
-      if (pptPanelRef.current && !pptPanelRef.current.contains(e.target as Node)) {
-        setPptPanelOpen(false);
       }
       if (presetDropdownRef.current && !presetDropdownRef.current.contains(e.target as Node)) {
         setPresetDropdownOpen(false);
@@ -2242,370 +2218,8 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
                   })()}
                 </div>
             )}
-            {/* Design system selector */}
-            {designSystemList && designSystemList.length > 0 && onDesignSystemChange && (
-                <div ref={designDropdownRef} style={{ position: "relative" }}>
-                  <button
-                    onClick={(e) => {
-                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                      setDesignDropdownRect({ top: rect.top, left: rect.left, width: rect.width });
-                      setDesignDropdownOpen((v) => !v);
-                    }}
-                    disabled={isStreaming}
-                    title="选择设计系统"
-                    style={{
-                      display: "flex", alignItems: "center", gap: 6,
-                      padding: "8px 12px",
-                      height: 32,
-                      maxWidth: 200, overflow: "hidden",
-                      background: designDropdownOpen ? "var(--bg-hover)" : "none",
-                      border: "none",
-                      borderRadius: 9,
-                      color: "var(--text-muted)",
-                      cursor: isStreaming ? "not-allowed" : "pointer",
-                      fontSize: 12,
-                      opacity: isStreaming ? 0.5 : 1,
-                      transition: "background 0.12s, color 0.12s",
-                    }}
-                    onMouseEnter={(e) => {
-                      if (isStreaming) return;
-                      e.currentTarget.style.background = "var(--bg-hover)";
-                      e.currentTarget.style.color = "var(--text)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = designDropdownOpen ? "var(--bg-hover)" : "none";
-                      e.currentTarget.style.color = "var(--text-muted)";
-                    }}
-                  >
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="13.5" cy="6.5" r="2.5" />
-                      <circle cx="17.5" cy="15.5" r="2.5" />
-                      <circle cx="8.5" cy="15.5" r="2.5" />
-                      <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z" />
-                    </svg>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
-                      {designSystem ? designSystemList.find(d => d.id === designSystem)?.name ?? designSystem : "Design"}
-                    </span>
-                  </button>
-                  {designDropdownOpen && designDropdownRect && (() => {
-                    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-                    const bottom = viewportHeight - designDropdownRect.top + 6;
-                    const maxH = Math.max(120, Math.min(designDropdownRect.top - 8, viewportHeight * 0.6));
-                    const grouped = designSystemList.reduce<Record<string, typeof designSystemList>>((acc, d) => {
-                      (acc[d.category] ||= []).push(d);
-                      return acc;
-                    }, {});
-                    return (
-                    <>
-                    <div style={{
-                      position: "fixed",
-                      bottom, left: designDropdownRect.left,
-                      zIndex: 500, background: "var(--bg)", border: "1px solid var(--border)",
-                      borderRadius: 8, boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
-                      overflow: "hidden", width: "max-content", minWidth: designDropdownRect.width, maxHeight: maxH, overflowY: "auto",
-                    }}>
-                      <button
-                        onClick={() => { setDesignDropdownOpen(false); onDesignSystemChange(null); }}
-                        style={{
-                          display: "flex", alignItems: "center", gap: 8,
-                          width: "100%", padding: "7px 12px",
-                          background: !designSystem ? "var(--bg-selected)" : "none",
-                          border: "none",
-                          color: !designSystem ? "var(--text)" : "var(--text-muted)",
-                          cursor: "pointer", fontSize: 12, textAlign: "left",
-                          fontWeight: !designSystem ? 600 : 400,
-                          borderBottom: "1px solid var(--border)",
-                        }}
-                      >
-                        {!designSystem
-                          ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="1.5 5 4 7.5 8.5 2.5" /></svg>
-                          : <span style={{ width: 10, flexShrink: 0 }} />}
-                        <span style={{ flex: 1 }}>None</span>
-                      </button>
-                      {Object.entries(grouped).map(([category, items]) => (
-                        <div key={category}>
-                          <div style={{
-                            padding: "6px 12px 4px",
-                            fontSize: 10, fontWeight: 600, color: "var(--text-dim)",
-                            textTransform: "uppercase", letterSpacing: "0.07em",
-                            borderTop: "1px solid var(--border)",
-                          }}>
-                            {category}
-                          </div>
-                          {items.map((d) => {
-                            const isActive = d.id === designSystem;
-                            return (
-                              <button
-                                key={d.id}
-                                onClick={() => { setDesignDropdownOpen(false); if (!isActive) onDesignSystemChange(d.id); }}
-                                style={{
-                                  display: "flex", alignItems: "center", gap: 8,
-                                  width: "100%", padding: "7px 12px",
-                                  background: isActive ? "var(--bg-selected)" : "none",
-                                  border: "none",
-                                  color: isActive ? "var(--text)" : "var(--text-muted)",
-                                  cursor: "pointer", fontSize: 12, textAlign: "left",
-                                  fontWeight: isActive ? 600 : 400,
-                                  whiteSpace: "nowrap",
-                                }}
-                                onMouseEnter={(e) => { setPreviewDsId(d.id); if (!isActive) e.currentTarget.style.background = "var(--bg-hover)"; }}
-                                onMouseLeave={(e) => { setPreviewDsId(null); if (!isActive) e.currentTarget.style.background = "none"; }}
-                              >
-                                {isActive
-                                  ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="1.5 5 4 7.5 8.5 2.5" /></svg>
-                                  : <span style={{ width: 10, flexShrink: 0 }} />}
-                                {d.name}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ))}
-                    </div>
-                    {previewDsId && designDropdownRect && (
-                      <div style={{
-                        position: "fixed",
-                        left: designDropdownRect.left + 340,
-                        bottom: (window.visualViewport?.height ?? window.innerHeight) - designDropdownRect.top + 6,
-                        width: 320, height: 200,
-                        zIndex: 600, borderRadius: 10, overflow: "hidden",
-                        border: "1px solid var(--border)",
-                        boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
-                        pointerEvents: "none",
-                      }}>
-                        <iframe
-                          src={`/api/design-systems/${encodeURIComponent(previewDsId)}/preview`}
-                          style={{
-                            border: "none",
-                            width: "200%", height: "200%",
-                            transform: "scale(0.5)", transformOrigin: "top left",
-                          }}
-                          title={`Preview ${previewDsId}`}
-                          sandbox="allow-same-origin"
-                        />
-                      </div>
-                    )}
-                    </>
-                    );
-                })()}
-                </div>
-            )}
 
           </div>
-
-          {/* PPT Studio Button */}
-          {!isStreaming && onSend && (
-            <div ref={pptPanelRef} style={{ position: 'relative' }}>
-              <button
-                onClick={() => setPptPanelOpen(v => !v)}
-                title="HTML PPT Studio"
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 5,
-                  padding: '8px 12px', height: 32,
-                  background: pptPanelOpen ? 'var(--bg-hover)' : 'none',
-                  border: 'none', borderRadius: 9,
-                  color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12,
-                  transition: 'background 0.12s, color 0.12s',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-hover)'; e.currentTarget.style.color = 'var(--text)'; }}
-                onMouseLeave={e => { e.currentTarget.style.background = pptPanelOpen ? 'var(--bg-hover)' : 'none'; e.currentTarget.style.color = 'var(--text-muted)'; }}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
-                </svg>
-                PPT
-              </button>
-
-              {pptPanelOpen && (
-                <div style={{
-                  position: 'absolute', bottom: '100%', left: 0, marginBottom: 8,
-                  width: 340, background: 'var(--bg-panel)', border: '1px solid var(--border)',
-                  borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.18)', zIndex: 500,
-                  padding: '16px', display: 'flex', flexDirection: 'column', gap: 12,
-                }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>HTML PPT Studio</div>
-
-                  {/* Topic */}
-                  <div>
-                    <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>主题 / 内容简述</label>
-                    <input
-                      type="text"
-                      placeholder="例：AI Agent 技术分享、2026 Q2 业绩复盘…"
-                      value={pptTopic}
-                      onChange={e => setPptTopic(e.target.value)}
-                      style={{
-                        width: '100%', padding: '8px 10px', fontSize: 12, boxSizing: 'border-box',
-                        border: '1px solid var(--border)', borderRadius: 7,
-                        background: 'var(--bg)', color: 'var(--text)', outline: 'none',
-                      }}
-                    />
-                  </div>
-
-                  {/* Audience */}
-                  <div>
-                    <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>受众（可选）</label>
-                    <input
-                      type="text"
-                      placeholder="例：工程师团队、VC 投资人、小红书用户…"
-                      value={pptAudience}
-                      onChange={e => setPptAudience(e.target.value)}
-                      style={{
-                        width: '100%', padding: '8px 10px', fontSize: 12, boxSizing: 'border-box',
-                        border: '1px solid var(--border)', borderRadius: 7,
-                        background: 'var(--bg)', color: 'var(--text)', outline: 'none',
-                      }}
-                    />
-                  </div>
-
-                  {/* Theme */}
-                  <div>
-                    <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>视觉主题</label>
-                    <select
-                      value={pptTheme}
-                      onChange={e => setPptTheme(e.target.value)}
-                      style={{
-                        width: '100%', padding: '8px 10px', fontSize: 12, boxSizing: 'border-box',
-                        border: '1px solid var(--border)', borderRadius: 7,
-                        background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer',
-                      }}
-                    >
-                      <optgroup label="深色 · 技术">
-                        <option value="tokyo-night">Tokyo Night — 蓝夜科技感</option>
-                        <option value="dracula">Dracula — 经典紫红深色</option>
-                        <option value="catppuccin-mocha">Catppuccin Mocha — 开发者友好深色</option>
-                        <option value="terminal-green">Terminal Green — 绿屏终端复古</option>
-                        <option value="nord">Nord — 北欧清冷蓝</option>
-                        <option value="gruvbox-dark">Gruvbox Dark — 暖棕复古深色</option>
-                        <option value="rose-pine">Rosé Pine — 柔和紫粉深色</option>
-                        <option value="vaporwave">Vaporwave — 蒸汽波霓虹紫</option>
-                        <option value="cyberpunk-neon">Cyberpunk Neon — 赛博霓虹</option>
-                      </optgroup>
-                      <optgroup label="浅色 · 专业">
-                        <option value="minimal-white">Minimal White — 极简白（内部汇报）</option>
-                        <option value="corporate-clean">Corporate Clean — 企业蓝正式汇报</option>
-                        <option value="pitch-deck-vc">Pitch Deck VC — YC 风融资路演</option>
-                        <option value="editorial-serif">Editorial Serif — 杂志风衬线高级感</option>
-                        <option value="academic-paper">Academic Paper — 学术论文风</option>
-                        <option value="swiss-grid">Swiss Grid — 瑞士网格 Helvetica</option>
-                        <option value="solarized-light">Solarized Light — 暖调浅色护眼</option>
-                        <option value="catppuccin-latte">Catppuccin Latte — 柔和奶咖浅色</option>
-                      </optgroup>
-                      <optgroup label="小红书 · 生活">
-                        <option value="xiaohongshu-white">小红书白 — 暖红衬线图文</option>
-                        <option value="soft-pastel">Soft Pastel — 马卡龙柔和</option>
-                        <option value="rainbow-gradient">Rainbow Gradient — 彩虹渐变欢乐</option>
-                        <option value="sunset-warm">Sunset Warm — 橘珊瑚渐变</option>
-                      </optgroup>
-                      <optgroup label="高冲击力 · 创意">
-                        <option value="neo-brutalism">Neo Brutalism — 厚描边硬阴影</option>
-                        <option value="glassmorphism">Glassmorphism — 毛玻璃苹果风</option>
-                        <option value="aurora">Aurora — 极光渐变</option>
-                        <option value="blueprint">Blueprint — 工程蓝图网格</option>
-                        <option value="y2k-chrome">Y2K Chrome — 千禧铬金属银</option>
-                        <option value="retro-tv">Retro TV — 复古显像管扫描线</option>
-                        <option value="news-broadcast">News Broadcast — 新闻播报风格</option>
-                        <option value="memphis-pop">Memphis Pop — 孟菲斯波普几何</option>
-                        <option value="magazine-bold">Magazine Bold — 杂志大标题冲击</option>
-                        <option value="japanese-minimal">Japanese Minimal — 和风极简侘寂</option>
-                        <option value="midcentury">Midcentury — 世纪中期现代复古</option>
-                        <option value="engineering-whiteprint">Engineering Whiteprint — 工程白图蓝线</option>
-                        <option value="arctic-cool">Arctic Cool — 冰川冷色石板蓝</option>
-                        <option value="bauhaus">Bauhaus — 包豪斯几何原色</option>
-                        <option value="sharp-mono">Sharp Mono — 锐利黑白高对比</option>
-                      </optgroup>
-                    </select>
-                  </div>
-
-                  {/* Template */}
-                  <div>
-                    <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Deck 模板（结构）</label>
-                    <select
-                      value={pptTemplate}
-                      onChange={e => setPptTemplate(e.target.value)}
-                      style={{
-                        width: '100%', padding: '8px 10px', fontSize: 12, boxSizing: 'border-box',
-                        border: '1px solid var(--border)', borderRadius: 7,
-                        background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer',
-                      }}
-                    >
-                      <option value="tech-sharing">Tech Sharing — 技术分享（封面/背景/方案/Demo/总结）</option>
-                      <option value="pitch-deck">Pitch Deck — 融资路演（问题/方案/市场/团队/融资）</option>
-                      <option value="product-launch">Product Launch — 产品发布（亮点/功能/对比/CTA）</option>
-                      <option value="weekly-report">Weekly Report — 周报复盘（目标/进展/风险/下周计划）</option>
-                      <option value="xhs-post">小红书图文 — 3:4 竖版图文（封面/内容/种草/结尾）</option>
-                      <option value="course-module">Course Module — 课程模块（学习目标/讲解/练习/小结）</option>
-                      <option value="presenter-mode-reveal">演讲者模式 — 含逐字稿（S键弹出提词器）</option>
-                    </select>
-                  </div>
-
-                  {/* Slides count */}
-                  <div>
-                    <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>页数：{pptSlides} 页</label>
-                    <input
-                      type="range" min={4} max={20} value={pptSlides}
-                      onChange={e => setPptSlides(Number(e.target.value))}
-                      style={{ width: '100%', accentColor: 'var(--accent)' }}
-                    />
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
-                      <span>4</span><span>20</span>
-                    </div>
-                  </div>
-
-                  {/* Generate button */}
-                  <button
-                    disabled={!pptTopic.trim()}
-                    onClick={() => {
-                      if (!pptTopic.trim()) return;
-
-                      const templateDescMap: Record<string, string> = {
-                        'tech-sharing': 'tech-sharing（技术分享：封面 → 背景/问题 → 解决方案 → 核心模块讲解 × 3 → Demo/效果 → 总结/Q&A）',
-                        'pitch-deck': 'pitch-deck（融资路演：封面 → 问题 → 解决方案 → 市场规模 → 产品/Demo → 商业模式 → 竞争壁垒 → 团队 → 融资计划）',
-                        'product-launch': 'product-launch（产品发布：封面 → 痛点 → 产品亮点 → 核心功能 × 3 → 对比竞品 → 价格/CTA）',
-                        'weekly-report': 'weekly-report（周报复盘：封面 → 本周目标 → 完成进展 → 数据指标 → 风险/阻塞 → 下周计划）',
-                        'xhs-post': 'xhs-post（小红书图文 3:4 竖版：封面卡片 → 内容卡片 × 3-4 → 种草/结尾卡片）',
-                        'course-module': 'course-module（课程模块：封面 → 学习目标 → 知识讲解 × 3 → 案例/练习 → 小结/作业）',
-                        'presenter-mode-reveal': 'presenter-mode-reveal（演讲者模式：每页含 <div class="notes"> 逐字稿 150-300 字，S 键弹出提词器窗口）',
-                      };
-
-                      const prompt = `请用 html-ppt skill 生成一份完整的单文件 HTML 演示文稿。
-
-## 内容要求
-- 主题：${pptTopic}
-${pptAudience ? `- 目标受众：${pptAudience}` : ''}
-- 页数：${pptSlides} 页
-
-## 技术规格
-- 视觉主题：${pptTheme}（对应 assets/themes/${pptTheme}.css）
-- Deck 模板结构：${templateDescMap[pptTemplate] || pptTemplate}
-- 必须是**单文件 HTML**，所有 CSS/JS **inline 内嵌**，不引用外部文件
-- 完整实现键盘导航（← →）、幻灯片切换动画
-- 每张 slide 为 \`<section class="slide">\` 元素，默认隐藏只显示 .is-active
-
-## 输出规范
-- 输出一段话说明 deck 结构，然后直接给出完整 HTML
-- HTML 以 \`<!doctype html>\` 开头，\`</html>\` 结尾
-- 不要截断，必须完整输出所有 ${pptSlides} 页内容
-${pptTemplate === 'presenter-mode-reveal' ? '- 每页必须有 <div class="notes"> 逐字稿，150-300 字，口语风格' : ''}
-${pptTemplate === 'xhs-post' ? '- 使用 3:4 竖版尺寸（width:1080px, height:1440px），小红书图文卡片风格' : ''}`;
-
-                      onSend(prompt);
-                      setPptPanelOpen(false);
-                      setPptTopic('');
-                      setPptAudience('');
-                    }}
-                    style={{
-                      width: '100%', padding: '9px', fontSize: 13, fontWeight: 600,
-                      background: pptTopic.trim() ? 'var(--accent)' : 'var(--bg-hover)',
-                      color: pptTopic.trim() ? '#fff' : 'var(--text-muted)',
-                      border: 'none', borderRadius: 8, cursor: pptTopic.trim() ? 'pointer' : 'not-allowed',
-                      transition: 'all 0.15s',
-                    }}
-                  >
-                    🎞 生成 PPT
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
 
           {/* Prompt Presets Button */}
           {!isStreaming && (

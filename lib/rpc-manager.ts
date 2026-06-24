@@ -39,9 +39,22 @@ function extractFolderNameFromSessionFile(sessionFile: string): string | null {
   return null;
 }
 
+function clampMimoModel(model: any) {
+  if (model && typeof model === "object") {
+    const idLower = String(model.id || "").toLowerCase();
+    if (idLower.includes("mimo")) {
+      model.maxTokens = 8192;
+    }
+  }
+  return model;
+}
+
 function injectSystemGuidelines(inner: any) {
   const model = inner.model;
   if (!model) return;
+
+  // Ensure model params are clamped if it's a mimo model
+  clampMimoModel(model);
 
   const sm = inner.sessionManager;
   const supportsVision = isVisionModel(model.provider, model.id);
@@ -58,6 +71,11 @@ function injectSystemGuidelines(inner: any) {
 - For example, if you create a search script or temporary preview page, write it to "${tempFolder}/index.html" or "${tempFolder}/search_something.py" instead of "index.html" or "search_something.py".
 - If you write data results, output them to "${tempFolder}/result.txt" instead of "result.txt".
 - DO NOT write any temporary, scrap, or execution files directly in the root workspace directory to prevent clutter. All files generated during this conversation session MUST be written inside "${tempFolder}/".<!-- workspace-clutter-end -->`;
+
+  const toolCallGuideline = `\n\n## Tool Calling Mandate (CRITICAL)
+- You MUST use the native function/tool calling API to invoke tools (such as 'write', 'read', 'edit', 'bash', 'grep', 'find', 'ls').
+- Do NOT output raw XML tags like '<tool_call>', '<function>', or '<parameter>' in your text response.
+- Any tool invocation MUST be performed through the native API. No exceptions.`;
 
   // Load design system if configured in the session
   let dsBlock = "";
@@ -83,11 +101,13 @@ function injectSystemGuidelines(inner: any) {
                          .replace(/\n\n## Workspace Clutter & Temporary Files Management[\s\S]*?<!-- workspace-clutter-end -->/g, "")
                          .replace(/\\n\\n## Workspace Clutter & Temporary Files Management[\\s\\S]*?(?:to prevent clutter|isolated folder)\\./g, "")
                          .replace(/\n\n## Workspace Clutter & Temporary Files Management[\s\S]*?(?:to prevent clutter|isolated folder)\./g, "")
+                         .replace(/\\n\\n## Tool Calling Mandate[\\s\\S]*?No exceptions\\./g, "")
+                         .replace(/\n\n## Tool Calling Mandate[\s\S]*?No exceptions\./g, "")
                          .replace(/\\n\\n---\\n## Design System — ABSOLUTE MANDATE[\\s\\S]*?---\\n/g, "")
                          .replace(/\n\n---\n## Design System — ABSOLUTE MANDATE[\s\S]*?---\n/g, "");
   };
 
-  let newPromptAdditions = tempGuideline;
+  let newPromptAdditions = tempGuideline + toolCallGuideline;
   if (supportsVision) {
     newPromptAdditions += visionGuideline;
   }
@@ -109,7 +129,7 @@ function injectSystemGuidelines(inner: any) {
         const originalPrompt = originalGet.apply(this, args);
         const activeModel = inner.model;
         const supportsVisionActive = activeModel ? isVisionModel(activeModel.provider, activeModel.id) : false;
-        let additions = tempGuideline;
+        let additions = tempGuideline + toolCallGuideline;
         if (supportsVisionActive) {
           additions += visionGuideline;
         }
@@ -535,10 +555,11 @@ export async function startRpcSession(
     });
     (inner as any).__sessionFolderName = folderName;
 
-    // Hijack inner.agent.state.model property to dynamically strip undefined values
+        // Hijack inner.agent.state.model property to dynamically strip undefined values
     // while preserving and invoking the original descriptor's getter/setter.
     // This completely prevents the Rust WASM/Native side from getting 'undefined' properties
     // which it parses as 'unit value', causing 'expected usize' deserialization crashes.
+    // It also clamps model maxTokens to safe values for mimo models to prevent timeouts.
     if (inner.agent.state) {
       let targetObj: any = inner.agent.state;
       let desc = Object.getOwnPropertyDescriptor(targetObj, "model");
@@ -557,10 +578,10 @@ export async function startRpcSession(
           Object.defineProperty(inner.agent.state, "model", {
             get() {
               const val = originalGet ? originalGet.call(this) : undefined;
-              return val ? JSON.parse(JSON.stringify(val)) : val;
+              return val ? clampMimoModel(JSON.parse(JSON.stringify(val))) : val;
             },
             set(newVal) {
-              const cleanVal = newVal ? JSON.parse(JSON.stringify(newVal)) : newVal;
+              const cleanVal = newVal ? clampMimoModel(JSON.parse(JSON.stringify(newVal))) : newVal;
               if (originalSet) {
                 originalSet.call(this, cleanVal);
               }
@@ -572,10 +593,10 @@ export async function startRpcSession(
           let currentVal = desc.value;
           Object.defineProperty(inner.agent.state, "model", {
             get() {
-              return currentVal ? JSON.parse(JSON.stringify(currentVal)) : currentVal;
+              return currentVal ? clampMimoModel(JSON.parse(JSON.stringify(currentVal))) : currentVal;
             },
             set(newVal) {
-              currentVal = newVal ? JSON.parse(JSON.stringify(newVal)) : newVal;
+              currentVal = newVal ? clampMimoModel(JSON.parse(JSON.stringify(newVal))) : newVal;
             },
             configurable: true,
             enumerable: true,

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { findModel } from "../../../../lib/model-resolver";
+import { isVisionModel } from "../../../../lib/vision";
 
 export const dynamic = "force-dynamic";
 
@@ -382,7 +383,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ description });
     } else {
       const imageUrl = `data:${normalizedMimeType};base64,${base64Data}`;
-      if (modelId && modelId.toLowerCase().includes("mimo") && modelId.toLowerCase().includes("flash")) {
+      if (!isVisionModel(provider || "", modelId || "")) {
         modelId = "mimo-v2-omni";
       }
       const requestBody = {

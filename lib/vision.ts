@@ -83,7 +83,7 @@ export function isVisionModel(provider: string, modelId: string): boolean {
     mid.includes("claude-4") ||
     mid.includes("gemini-") ||
     mid.includes("pixtral") ||
-    mid.includes("mimo") ||
+    mid === "mimo-v2.5" || (mid.includes("mimo") && (mid.includes("v2-pro") || mid.includes("v2-omni"))) ||
     mid.includes("-vl") ||
     mid.includes("molmo") ||
     mid.includes("paligemma") ||
