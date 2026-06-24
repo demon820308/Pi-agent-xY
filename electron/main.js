@@ -59,12 +59,15 @@ function startNextServer() {
       
       log(`Starting Next.js Server Worker from path: ${serverPath}`);
       
-      // Sanitise environment variables to ensure all values are strings
+      // Sanitise environment variables: utilityProcess.fork() requires ALL values
+      // to be plain strings. Coerce everything and skip non-serialisable entries.
       const cleanEnv = {};
       for (const [key, value] of Object.entries(env)) {
-        if (value !== undefined && value !== null) {
-          cleanEnv[key] = String(value);
-        }
+        if (value === undefined || value === null) continue;
+        const str = String(value);
+        // Skip if String() couldn't produce a usable result
+        if (str === "undefined" || str === "null") continue;
+        cleanEnv[key] = str;
       }
       cleanEnv.PORT = String(PORT);
       cleanEnv.NODE_ENV = "production";

@@ -3,9 +3,26 @@ const path = require("path");
 const next = require("next");
 
 const PORT = process.env.PORT || 3030;
+
+// When packaged in an asar archive, __dirname points inside app.asar but
+// the .next build output is extracted to app.asar.unpacked (via asarUnpack).
+// We must resolve the actual unpacked directory so Next.js can find its files.
+function resolveAppDir() {
+  const appDir = path.join(__dirname, "..");
+  // Replace app.asar path with the unpacked counterpart if it exists
+  const unpackedDir = appDir.replace("app.asar", "app.asar.unpacked");
+  try {
+    const fs = require("fs");
+    if (fs.existsSync(path.join(unpackedDir, ".next"))) {
+      return unpackedDir;
+    }
+  } catch (e) {}
+  return appDir;
+}
+
 const nextApp = next({
   dev: false,
-  dir: path.join(__dirname, "..")
+  dir: resolveAppDir()
 });
 const handle = nextApp.getRequestHandler();
 
