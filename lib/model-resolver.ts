@@ -64,32 +64,84 @@ function getModelsEndpoint(provider: string, baseUrl: string): string {
   return url;
 }
 
+function isLiteralApiKey(key: string): boolean {
+  if (!key || typeof key !== "string") return false;
+  if (key.startsWith("!")) return false; // shell command
+  if (/^[A-Z_][A-Z0-9_]*$/.test(key)) return false; // env var name
+  return true;
+}
+
 export async function syncModelsInternal(registry: any, force = false) {
   try {
     const cache = loadCache();
     const now = Date.now();
     
     const authPath = join(getAgentDir(), "auth.json");
-    if (!existsSync(authPath)) return;
-    const authData = JSON.parse(readFileSync(authPath, "utf8"));
+    let authData: Record<string, any> = {};
+    if (existsSync(authPath)) {
+      try {
+        authData = JSON.parse(readFileSync(authPath, "utf8"));
+      } catch (e) {
+        console.error("Failed to parse auth.json:", e);
+      }
+    }
     const providers = Object.keys(authData);
     
-    let cacheUpdated = false;
+    const modelsPath = join(getAgentDir(), "models.json");
+    let modelsData: any = { providers: {} };
+    if (existsSync(modelsPath)) {
+      try {
+        modelsData = JSON.parse(readFileSync(modelsPath, "utf8")) || { providers: {} };
+        if (!modelsData.providers) modelsData.providers = {};
+      } catch (e) {
+        console.error("Failed to parse models.json:", e);
+      }
+    }
     
-    for (const provider of providers) {
-      const apiKey = authData[provider]?.key;
-      if (!apiKey) continue;
+    // Collect all providers to sync
+    interface ProviderSyncInfo {
+      name: string;
+      apiKey: string;
+      baseUrl: string;
+      isCustom: boolean;
+    }
+    const providersToSync: ProviderSyncInfo[] = [];
+
+    // From auth.json
+    for (const name of providers) {
+      const apiKey = authData[name]?.key;
+      if (apiKey) {
+        const baseModel = (registry as any).models?.find((m: any) => m.provider === name);
+        const baseUrl = baseModel?.baseUrl || "";
+        providersToSync.push({ name, apiKey, baseUrl, isCustom: false });
+      }
+    }
+
+    // From models.json
+    for (const name of Object.keys(modelsData.providers)) {
+      const providerEntry = modelsData.providers[name];
+      const apiKey = providerEntry?.apiKey;
+      const baseUrl = providerEntry?.baseUrl || "";
+      if (apiKey && isLiteralApiKey(apiKey)) {
+        if (!providersToSync.some(p => p.name === name)) {
+          providersToSync.push({ name, apiKey, baseUrl, isCustom: true });
+        }
+      }
+    }
+    
+    let cacheUpdated = false;
+    let modelsUpdated = false;
+    
+    for (const pInfo of providersToSync) {
+      const { name: provider, apiKey, baseUrl, isCustom } = pInfo;
       
       // Sync cache every 1 hour, unless forced
-      const existing = cache[provider];
-      if (!force && existing && (now - existing.updatedAt) < 60 * 60 * 1000) {
+      const cacheCheck = cache[provider];
+      if (!force && cacheCheck && (now - cacheCheck.updatedAt) < 60 * 60 * 1000) {
         continue;
       }
       
-      const baseModel = (registry as any).models?.find((m: any) => m.provider === provider);
-      const rawBaseUrl = baseModel?.baseUrl || "";
-      
-      const endpoint = getModelsEndpoint(provider, rawBaseUrl);
+      const endpoint = getModelsEndpoint(provider, baseUrl);
       if (!endpoint || (!endpoint.startsWith("http://") && !endpoint.startsWith("https://"))) {
         continue;
       }
@@ -141,6 +193,27 @@ export async function syncModelsInternal(registry: any, force = false) {
             models
           };
           cacheUpdated = true;
+          
+          if (isCustom) {
+            const existingModels = modelsData.providers[provider].models || [];
+            const updatedModels = modelIds.map(id => {
+              const existing = existingModels.find((m: any) => m.id === id);
+              if (existing) return existing;
+              const isVision = isVisionModel(provider, id);
+              const isReasoning = id.toLowerCase().includes("pro") || id.toLowerCase().includes("omni") || id.toLowerCase().includes("reasoning") || id.toLowerCase().includes("thinking") || id.toLowerCase().includes("-r1");
+              const newModel: any = { id, name: id };
+              if (isReasoning) newModel.reasoning = true;
+              if (isVision) {
+                newModel.input = ["text", "image"];
+              } else {
+                newModel.input = ["text"];
+              }
+              return newModel;
+            });
+            modelsData.providers[provider].models = updatedModels;
+            modelsUpdated = true;
+          }
+          
           console.log(`[model-resolver] Successfully synced ${modelIds.length} models for "${provider}".`);
         }
       } catch (err) {
@@ -150,6 +223,13 @@ export async function syncModelsInternal(registry: any, force = false) {
     
     if (cacheUpdated) {
       saveCache(cache);
+    }
+    if (modelsUpdated) {
+      try {
+        writeFileSync(modelsPath, JSON.stringify(modelsData, null, 2), "utf8");
+      } catch (e) {
+        console.error("Failed to save models.json:", e);
+      }
     }
   } catch (e) {
     console.error("[model-resolver] Error in syncModelsInternal:", e);

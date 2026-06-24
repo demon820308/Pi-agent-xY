@@ -264,9 +264,17 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 // ── Provider detail ───────────────────────────────────────────────────────────
 
-function ProviderDetail({ name, provider, onChange, onRename, onDelete }: {
+function isLiteralApiKey(key: string | undefined): boolean {
+  if (!key || typeof key !== "string") return false;
+  if (key.startsWith("!")) return false; // shell command
+  if (/^[A-Z_][A-Z0-9_]*$/.test(key)) return false; // env var name
+  return true;
+}
+
+function ProviderDetail({ name, provider, onChange, onRename, onDelete, syncing, onSync }: {
   name: string; provider: ProviderEntry;
   onChange: (p: ProviderEntry) => void; onRename: (n: string) => void; onDelete: () => void;
+  syncing?: boolean; onSync?: () => void;
 }) {
   const [editingName, setEditingName] = useState(name);
   useEffect(() => setEditingName(name), [name]);
@@ -281,10 +289,28 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete }: {
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <SectionTitle>Provider</SectionTitle>
-        <button onClick={onDelete}
-          style={{ padding: "3px 8px", background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, color: "#ef4444", cursor: "pointer", fontSize: 11 }}>
-          Delete
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          {provider.apiKey && isLiteralApiKey(provider.apiKey) && (
+            <button
+              type="button"
+              onClick={onSync}
+              disabled={syncing}
+              style={{
+                padding: "3px 8px",
+                background: "none", border: "1px solid var(--border)",
+                borderRadius: 4, color: "var(--text-muted)",
+                cursor: syncing ? "not-allowed" : "pointer", fontSize: 11,
+                display: "inline-flex", alignItems: "center", gap: 4
+              }}
+            >
+              {syncing ? "Syncing..." : "🔄 Sync Models"}
+            </button>
+          )}
+          <button onClick={onDelete}
+            style={{ padding: "3px 8px", background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, color: "#ef4444", cursor: "pointer", fontSize: 11 }}>
+            Delete
+          </button>
+        </div>
       </div>
 
       <Field label="Provider name">
@@ -1571,6 +1597,18 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
         const d = await res.json();
         if (d.modelList) setSystemModels(d.modelList);
         if (d.defaultModel) setDefaultModel(d.defaultModel);
+        
+        try {
+          const configRes = await fetch("/api/models-config");
+          if (configRes.ok) {
+            const cfg = await configRes.json();
+            if (cfg && cfg.providers) {
+              setConfig(cfg);
+            }
+          }
+        } catch (err) {
+          console.error("Failed to reload models config after sync:", err);
+        }
       }
     } catch (e) {
       console.error("Failed to sync models:", e);
@@ -1784,6 +1822,8 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
           onChange={(p) => updateProvider(selection.name, p)}
           onRename={(n) => renameProvider(selection.name, n)}
           onDelete={() => deleteProvider(selection.name)}
+          syncing={syncing}
+          onSync={handleSyncModels}
         />
       );
     }
