@@ -1752,27 +1752,7 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
 
                         <div style={{ height: 1, background: "var(--border)", margin: "4px 8px" }} />
 
-                        <button
-                          onClick={() => {
-                            setGeminiMenuOpen(false);
-                            const prefix = "帮我生成一张图片：";
-                            setValue(prev => prev.startsWith(prefix) ? prev : `${prefix}${prev}`);
-                            setTimeout(() => textareaRef.current?.focus(), 50);
-                          }}
-                          style={menuItemStyle}
-                          onMouseEnter={menuItemHover}
-                          onMouseLeave={menuItemLeave}
-                        >
-                          <span style={menuItemIconStyle}>
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 14.7255 3.09032 17.1962 4.85857 19" />
-                              <circle cx="7.5" cy="10.5" r="1" fill="currentColor" />
-                              <circle cx="11.5" cy="7.5" r="1" fill="currentColor" />
-                              <circle cx="16.5" cy="9.5" r="1" fill="currentColor" />
-                            </svg>
-                          </span>
-                          <span style={{ flex: 1 }}>制作图片</span>
-                        </button>
+
 
                         <button
                           onClick={() => {

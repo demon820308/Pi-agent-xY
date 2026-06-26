@@ -351,40 +351,24 @@ export function DeepResearchPanel({ onClose, onStateChange }: DeepResearchPanelP
 
   // ── PDF Export ─────────────────────────────────────────────────────────
 
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     const container = document.querySelector(".markdown-body");
     if (!container) return;
     const htmlContent = container.innerHTML;
 
-    const printWin = window.open("", "_blank");
-    if (!printWin) return;
-
-    printWin.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
-<title>${query.trim() || "深度研究报告"}</title>
-<style>
-  @page { margin: 2cm; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; color: #1a1a1a; line-height: 1.7; font-size: 14px; max-width: 800px; margin: 0 auto; padding: 0 20px; }
-  h1 { font-size: 28px; margin-top: 0; page-break-before: avoid; }
-  h2 { font-size: 22px; margin-top: 2em; page-break-after: avoid; }
-  h3 { font-size: 18px; page-break-after: avoid; }
-  table { border-collapse: collapse; width: 100%; margin: 1em 0; page-break-inside: avoid; }
-  th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
-  th { background: #f5f5f5; font-weight: 600; }
-  tr:nth-child(even) { background: #fafafa; }
-  a { color: #2563eb; text-decoration: none; }
-  img { max-width: 100%; }
-  hr { border: none; border-top: 1px solid #ddd; margin: 2em 0; }
-  pre { background: #f5f5f5; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
-  code { background: #f0f0f0; padding: 1px 4px; border-radius: 3px; font-size: 13px; }
-  pre code { background: none; padding: 0; }
-  @media print { body { max-width: none; } }
-</style></head><body>${htmlContent}</body></html>`);
-    printWin.document.close();
-
-    setTimeout(() => {
-      printWin.print();
-      printWin.close();
-    }, 300);
+    try {
+      const res = await fetch("/api/deep-research/export-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ html: htmlContent, title: query.trim() || "深度研究报告" })
+      });
+      const data = await res.json();
+      if (data.id) {
+        window.open(`/api/deep-research/export-pdf?id=${data.id}`, "_blank");
+      }
+    } catch (e) {
+      console.error("Failed to export PDF", e);
+    }
   };
 
   return (
@@ -849,7 +833,18 @@ export function DeepResearchPanel({ onClose, onStateChange }: DeepResearchPanelP
           <div style={{ flex: 1, background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 10, padding: 24, overflowY: "auto" }}>
             {activeTab === "preview" ? (
               <div className="markdown-body" style={{ lineHeight: 1.7, fontSize: 14 }}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{report}</ReactMarkdown>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    a: ({ href, children, ...props }) => (
+                      <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+                        {children}
+                      </a>
+                    )
+                  }}
+                >
+                  {report}
+                </ReactMarkdown>
               </div>
             ) : (
               <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text)" }}>

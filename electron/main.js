@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, shell } = require("electron");
 const { fork, execSync } = require("child_process");
 const path = require("path");
 const http = require("http");
@@ -131,6 +131,36 @@ function createWindow() {
 
   mainWindow.on("closed", () => {
     mainWindow = null;
+  });
+
+  // Open external links in default browser
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (url.startsWith("http:") || url.startsWith("https:")) {
+      try {
+        const parsedUrl = new URL(url);
+        if (parsedUrl.host !== `localhost:${PORT}`) {
+          event.preventDefault();
+          shell.openExternal(url);
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith("http:") || url.startsWith("https:")) {
+      try {
+        const parsedUrl = new URL(url);
+        if (parsedUrl.host !== `localhost:${PORT}` || url.includes("/api/deep-research/export-pdf")) {
+          shell.openExternal(url);
+          return { action: "deny" };
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+    return { action: "allow" };
   });
 }
 
