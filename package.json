@@ -1,6 +1,6 @@
 {
   "name": "@zwbigi/pi-agent-xy",
-  "version": "0.6.44",
+  "version": "0.6.41",
   "author": "demon820308",
   "description": "Pi Agent xY - Web UI for the pi coding agent",
   "main": "electron/main.js",
@@ -31,7 +31,8 @@
     "electron:dev": "concurrently \"next dev -p 3030 --webpack\" \"wait-on http://localhost:3030 && electron .\"",
     "electron:build": "npm run build && electron-builder",
     "update-core": "node scripts/update-core.js",
-    "sync-ppt": "node scripts/sync-ppt-master.js"
+    "sync-ppt": "node scripts/sync-ppt-master.js",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^0.79.10",
@@ -66,6 +67,7 @@
     "electron-builder": "^26.8.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
+    "patch-package": "^8.0.1",
     "postcss": "^8",
     "pptxgenjs": "^3.12.0",
     "tailwindcss": "^4.2.2",

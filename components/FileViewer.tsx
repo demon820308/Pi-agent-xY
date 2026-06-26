@@ -756,13 +756,25 @@ function LocalPptxViewer({ src }: { filePath: string; src: string; formatSizeStr
   // 4. Render the current slide on the main canvas when viewer, slide index, or canvas dimensions change
   useEffect(() => {
     const currentViewer = viewer;
-    if (!currentViewer || !canvasRef.current || canvasWidth === 0 || canvasHeight === 0 || isModalOpen) return;
+    const canvas = canvasRef.current;
+    if (!currentViewer || !canvas || canvasWidth === 0 || canvasHeight === 0 || isModalOpen) return;
+
+    // Fix: pptxviewjs reads canvas.style.width/height (priority 1) to determine
+    // logical dimensions. If the style string is empty, it falls back to
+    // getBoundingClientRect(), which in Electron returns a value distorted by the
+    // window's zoom factor — causing coordinate offsets.
+    // Imperatively setting the style here (before renderSlide) guarantees the library
+    // always sees the correct logical px values regardless of rendering environment.
+    const cssW = `${Math.round(canvasWidth)}px`;
+    const cssH = `${Math.round(canvasHeight)}px`;
+    if (canvas.style.width !== cssW) canvas.style.width = cssW;
+    if (canvas.style.height !== cssH) canvas.style.height = cssH;
 
     let active = true;
     async function draw() {
       if (!currentViewer) return;
       try {
-        await currentViewer.renderSlide(currentSlide, canvasRef.current, { quality: "high" });
+        await currentViewer.renderSlide(currentSlide, canvas, { quality: "high" });
       } catch (e) {
         if (active) {
           console.error("Render slide error:", e);
@@ -779,13 +791,20 @@ function LocalPptxViewer({ src }: { filePath: string; src: string; formatSizeStr
   // 4b. Render the current slide in the modal when viewer, currentSlide, dimensions, or canvas size changes
   useEffect(() => {
     const currentViewer = viewer;
-    if (!isModalOpen || !currentViewer || !modalCanvasRef.current || modalCanvasWidth === 0 || modalCanvasHeight === 0) return;
+    const modalCanvas = modalCanvasRef.current;
+    if (!isModalOpen || !currentViewer || !modalCanvas || modalCanvasWidth === 0 || modalCanvasHeight === 0) return;
+
+    // Fix: same imperative style pre-set for the fullscreen modal canvas.
+    const cssW = `${Math.round(modalCanvasWidth)}px`;
+    const cssH = `${Math.round(modalCanvasHeight)}px`;
+    if (modalCanvas.style.width !== cssW) modalCanvas.style.width = cssW;
+    if (modalCanvas.style.height !== cssH) modalCanvas.style.height = cssH;
 
     let active = true;
     async function draw() {
       if (!currentViewer) return;
       try {
-        await currentViewer.renderSlide(currentSlide, modalCanvasRef.current, { quality: "high" });
+        await currentViewer.renderSlide(currentSlide, modalCanvas, { quality: "high" });
       } catch (e) {
         if (active) {
           console.error("Render modal slide error:", e);
