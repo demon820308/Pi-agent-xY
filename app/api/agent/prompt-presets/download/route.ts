@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 import JSZip from "jszip";
+import { getAppRoot } from "@/lib/app-root";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,7 @@ export async function POST(req: Request) {
       };
 
       try {
-        const repoRoot = path.join(process.cwd(), "awesome-gpt-image-2-API-and-Prompts-main");
+        const repoRoot = path.join(getAppRoot(), "awesome-gpt-image-2-API-and-Prompts-main");
         
         // If repoRoot already exists, check if cases and images exist
         if (fs.existsSync(repoRoot) && fs.existsSync(path.join(repoRoot, "cases"))) {
@@ -95,7 +96,7 @@ export async function POST(req: Request) {
 
         send({ stage: "extracting", progress: 0, message: `开始解压，共 ${totalFiles} 个文件...` });
 
-        const installDir = process.cwd();
+        const installDir = getAppRoot();
 
         for (let i = 0; i < totalFiles; i++) {
           const fileName = filesToExtract[i];

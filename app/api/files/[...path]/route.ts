@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 import { listAllSessions } from "@/lib/session-reader";
+import { getAppRoot } from "@/lib/app-root";
 
 const IGNORED_NAMES = new Set([
   "node_modules", ".git", ".next", "dist", "build", "__pycache__",
@@ -141,7 +142,7 @@ async function getAllowedRoots(): Promise<Set<string>> {
 
   const sessions = await listAllSessions();
   const roots = new Set<string>();
-  roots.add(process.cwd());
+  roots.add(getAppRoot());
   for (const s of sessions) {
     if (s.cwd) {
       roots.add(s.cwd);

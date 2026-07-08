@@ -3,6 +3,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
+import { getAppRoot } from "@/lib/app-root";
 
 export const dynamic = "force-dynamic";
 
@@ -86,11 +87,12 @@ export async function POST(req: Request) {
         updatedAt: Math.floor(Date.now() / 1000)
       }, null, 2), "utf-8");
       
-      const scriptPath = path.join(process.cwd(), "scripts", "download_model.py");
+      const scriptPath = path.join(getAppRoot(), "scripts", "download_model.py");
       
       console.log(`[manage-models] Spawning download process: python ${scriptPath} --model ${modelId} --mirror ${mirror}`);
       
-      const child = spawn("python", [scriptPath, "--model", modelId, "--mirror", mirror], {
+      const pythonCmd = process.platform === "win32" ? "python" : "python3";
+      const child = spawn(pythonCmd, [scriptPath, "--model", modelId, "--mirror", mirror], {
         detached: false,
         stdio: "inherit"
       });

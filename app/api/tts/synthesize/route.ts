@@ -4,6 +4,7 @@ import { cleanSpeechText } from "@/lib/tts-utils";
 import fs from "fs";
 import path from "path";
 import { resolveSessionPath } from "@/lib/session-reader";
+import { getAppRoot } from "@/lib/app-root";
 
 export const dynamic = "force-dynamic";
 
@@ -65,7 +66,7 @@ export async function POST(req: Request) {
       if (localKey) {
         const agentDir = getAgentDir();
         const modelPath = path.join(agentDir, "local-models", localKey);
-        const scriptPath = path.join(process.cwd(), "scripts", scriptName);
+        const scriptPath = path.join(getAppRoot(), "scripts", scriptName);
         
         // Check if server is already running on port 9880
         isLocalServerRunning = await new Promise<boolean>((resolve) => {
@@ -100,7 +101,7 @@ export async function POST(req: Request) {
           const { spawn } = require("child_process");
           
           // Prepend ffmpeg-static binary path to PATH to support decoding WebM/MP3 formats
-          const ffmpegStaticPath = path.join(process.cwd(), "node_modules", "ffmpeg-static");
+          const ffmpegStaticPath = path.join(getAppRoot(), "node_modules", "ffmpeg-static");
           const pathKey = Object.keys(process.env).find(k => k.toLowerCase() === "path") || "PATH";
           const oldPath = process.env[pathKey] || "";
           
@@ -109,7 +110,8 @@ export async function POST(req: Request) {
             [pathKey]: `${ffmpegStaticPath}${path.delimiter}${oldPath}`
           };
           
-          const child = spawn("python", [scriptPath, "--port", "9880", "--model", modelPath], {
+          const pythonCmd = process.platform === "win32" ? "python" : "python3";
+          const child = spawn(pythonCmd, [scriptPath, "--port", "9880", "--model", modelPath], {
             detached: false,
             stdio: "inherit",
             env: spawnEnv

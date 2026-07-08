@@ -1,9 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { existsSync, mkdirSync, readdirSync, statSync, copyFileSync } from 'fs';
 import { join, resolve } from 'path';
+import { homedir } from 'os';
 import { execSync } from 'child_process';
 
-const TEMPLATE_DIR = 'C:\\Users\\demon\\Desktop\\ai-website-cloner-template-master';
+// Template dir: check APP_ROOT (Electron injects this) first, then fall back to ~/ai-website-cloner-template
+function getTemplateDir(): string {
+  const appRoot = process.env.APP_ROOT;
+  if (appRoot) {
+    const candidate = join(appRoot, 'ai-website-cloner-template-master');
+    if (existsSync(candidate)) return candidate;
+  }
+  return join(homedir(), 'ai-website-cloner-template-master');
+}
+
+const TEMPLATE_DIR = getTemplateDir();
 
 const EXCLUDE_DIRS = new Set([
   'node_modules', '.git', '.next', 'out', 'build', 'dist',
@@ -52,7 +63,7 @@ export async function POST(req: NextRequest) {
       } catch {
         return NextResponse.json({ error: 'Invalid URL' }, { status: 400 });
       }
-      projectPath = `C:\\Users\\demon\\Desktop\\cloned-websites\\${hostname}`;
+      projectPath = join(homedir(), 'cloned-websites', hostname);
     }
 
     projectPath = resolve(projectPath);

@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, existsSync, cpSync } from "fs";
 import { join } from "path";
+import { getAppRoot } from "./app-root";
 import { parseFrontmatter, getAgentDir } from "@earendil-works/pi-coding-agent";
 
 export interface DesignSystem {
@@ -8,7 +9,7 @@ export interface DesignSystem {
   category: string;
 }
 
-const BUNDLED_DESIGN_MD_DIR = join(process.cwd(), "design-md");
+const BUNDLED_DESIGN_MD_DIR = join(getAppRoot(), "design-md");
 
 let _designMdDir: string | null = null;
 function getDesignMdDir(): string {

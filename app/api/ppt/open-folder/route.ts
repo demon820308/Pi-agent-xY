@@ -14,9 +14,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
-    // Spawn Windows Explorer to select/highlight the file
-    // Using spawn is safe from shell injection because args are passed directly.
-    spawn("explorer.exe", [`/select,${filePath}`], { detached: true, stdio: "ignore" });
+    // Open file manager and highlight/reveal the file (cross-platform)
+    if (process.platform === "darwin") {
+      spawn("open", ["-R", filePath], { detached: true, stdio: "ignore" });
+    } else if (process.platform === "win32") {
+      spawn("explorer.exe", [`/select,${filePath}`], { detached: true, stdio: "ignore" });
+    } else {
+      // Linux: open the containing directory
+      const { dirname } = require("path");
+      spawn("xdg-open", [dirname(filePath)], { detached: true, stdio: "ignore" });
+    }
 
     return NextResponse.json({ success: true });
   } catch (err: any) {

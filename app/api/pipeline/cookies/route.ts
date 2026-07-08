@@ -2,11 +2,12 @@ import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { getAppRoot } from "@/lib/app-root";
 
 export const dynamic = "force-dynamic";
 
 const getCookiesPaths = () => {
-  const localPath = path.join(process.cwd(), "cookies.txt");
+  const localPath = path.join(getAppRoot(), "cookies.txt");
   const persistentPath = path.join(os.homedir(), ".pi", "agent", "cookies.txt");
   return { localPath, persistentPath };
 };

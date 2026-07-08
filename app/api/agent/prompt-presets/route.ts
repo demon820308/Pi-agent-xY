@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
+import { getAppRoot } from "@/lib/app-root";
 
 export const dynamic = "force-dynamic";
 
@@ -88,7 +89,7 @@ function parseCasesFromFile(filePath: string, category: string, imagesDir: strin
 
 export async function GET(req: Request) {
   try {
-    const repoRoot = path.join(process.cwd(), "awesome-gpt-image-2-API-and-Prompts-main");
+    const repoRoot = path.join(getAppRoot(), "awesome-gpt-image-2-API-and-Prompts-main");
     const casesDir = path.join(repoRoot, "cases");
     const imagesDir = path.join(repoRoot, "images");
 

@@ -3,6 +3,7 @@ import { spawn } from "child_process";
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { getAppRoot } from "@/lib/app-root";
 
 export const dynamic = "force-dynamic";
 
@@ -78,7 +79,7 @@ export async function POST(req: Request) {
 
     // Build yt-dlp arguments dynamically, adding cookies if cookies.txt is present in project root or system home
     const args = ["-g", "-f", "bestaudio/best"];
-    const localCookiesPath = path.join(process.cwd(), "cookies.txt");
+    const localCookiesPath = path.join(getAppRoot(), "cookies.txt");
     const persistentCookiesPath = path.join(os.homedir(), ".pi", "agent", "cookies.txt");
     
     let cookiesPath = "";
@@ -99,6 +100,12 @@ export async function POST(req: Request) {
     const child = spawn("yt-dlp", args);
     let stdout = "";
     let stderr = "";
+
+    child.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "ENOENT") {
+        stderr = "yt-dlp 未安装或不在 PATH 中。请先安装: brew install yt-dlp (macOS) 或 pip install yt-dlp";
+      }
+    });
 
     child.stdout.on("data", (data) => {
       stdout += data.toString();

@@ -8,6 +8,7 @@ import { loadDesignMd, extractKeyTokens } from "./design-loader";
 import { existsSync, readdirSync, statSync, mkdirSync, copyFileSync } from "fs";
 import { join } from "path";
 import { createResourceLoader } from "./skills-util";
+import { getAppRoot } from "./app-root";
 
 function formatTimestamp(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -501,7 +502,7 @@ export async function startRpcSession(
 
     // Auto-initialize built-in skills in workspace if not present or empty
     const workspaceSkillsDir = join(agentCwd, ".agents", "skills");
-    const sourceSkillsDir = join(process.cwd(), "skills-main", "skills");
+    const sourceSkillsDir = join(getAppRoot(), "skills-main", "skills");
 
     if (existsSync(sourceSkillsDir)) {
       try {

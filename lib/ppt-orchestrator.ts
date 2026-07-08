@@ -5,6 +5,7 @@ import { existsSync, writeFileSync, mkdirSync, readdirSync, readFileSync, append
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { resolveSessionPath } from "./session-reader";
 import { callLLM } from "./llm-caller";
+import { getAppRoot } from "./app-root";
 
 const PPT_ORCHESTRATOR_VERSION = 7;
 
@@ -22,7 +23,7 @@ export interface PptProgress {
 
 class PptOrchestrator extends EventEmitter {
   private sessions = new Map<string, PptProgress>();
-  private readonly appRoot = process.cwd();
+  private readonly appRoot = getAppRoot();
   private readonly scriptsRoot = join(this.appRoot, "ppt-master-main", "skills", "ppt-master", "scripts");
 
   constructor() {

@@ -1,4 +1,5 @@
 import { join } from "path";
+import { getAppRoot } from "./app-root";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, readdirSync, statSync } from "fs";
 import { exec } from "child_process";
 import { promisify } from "util";
@@ -167,7 +168,7 @@ export async function syncBuiltInSkills(
     const updatedSkillsPath = getBuiltInSkillsPath(agentDir);
     if (existsSync(updatedSkillsPath)) {
       // 1. Copy to templates: process.cwd()/skills-main/skills
-      const templatesSkillsDir = join(process.cwd(), "skills-main", "skills");
+      const templatesSkillsDir = join(getAppRoot(), "skills-main", "skills");
       if (existsSync(templatesSkillsDir)) {
         console.log(`[skills] Copying updated skills to templates: ${templatesSkillsDir}`);
         const skillsSubdirs = readdirSync(updatedSkillsPath);
