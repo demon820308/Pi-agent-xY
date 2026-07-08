@@ -62,6 +62,7 @@ function startNextServer() {
       
       // Fork Next.js server as a separate child process (Electron Helper)
       nextProcess = fork(serverPath, [], {
+        cwd: path.join(__dirname, ".."),
         env: {
           ...env,
           PORT,
